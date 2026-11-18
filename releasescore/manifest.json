@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "ReleaseScore",
+  "version": "0.2.1",
+  "description": "Affiche une note sur 100 à côté de chaque version, sur les fiches de torrent de C411, d'après ton profil. Complète le site, ne le remplace pas.",
+  "minimum_chrome_version": "111",
+  "icons": { "16": "icones/16.png", "32": "icones/32.png", "48": "icones/48.png", "128": "icones/128.png" },
+  "action": { "default_title": "ReleaseScore", "default_popup": "fenetre/fenetre.html", "default_icon": { "16": "icones/16.png", "32": "icones/32.png", "48": "icones/48.png" } },
+  "permissions": ["storage", "unlimitedStorage", "activeTab"],
+  "content_scripts": [
+    {
+      "matches": ["https://c411.org/*", "https://www.c411.org/*"],
+      "js": ["moteur/note.js", "moteur/lecteur-mediainfo.js", "contenu/fiche.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
