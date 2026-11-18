@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>ReleaseScore</title>
+<link rel="stylesheet" href="fenetre.css">
+</head>
+<body>
+<header>
+  <img class="marque" src="../icones/48.png" alt="" width="22" height="22">
+  <h1>ReleaseScore</h1>
+  <span class="etat" id="etat"></span>
+</header>
+
+<main id="vue-principale">
+  <section>
+    <label class="rubrique" for="profil">Profil actif</label>
+    <select id="profil"></select>
+    <div class="sous" id="resume-profil"></div>
+    <div class="boutons">
+      <button type="button" id="modifier" aria-expanded="false">Modifier</button>
+      <button type="button" id="nouveau" aria-expanded="false">Nouveau profil</button>
+    </div>
+    <div id="creation" hidden>
+      <label class="sous" for="nom-profil">Nom du nouveau profil (il reprend les réglages affichés)</label>
+      <div class="ligne"><input id="nom-profil" type="text" maxlength="40" autocomplete="off"><button type="button" id="creer">Créer</button></div>
+      <div class="alerte" id="alerte-nom" role="alert" hidden></div>
+    </div>
+    <div id="reglages" hidden></div>
+    <div class="boutons" id="actions-profil"></div>
+  </section>
+
+  <section>
+    <span class="rubrique">Notation</span>
+    <span class="seg" id="notation" role="group" aria-label="Notation"><button type="button" data-mode="rapide">Rapide</button><button type="button" data-mode="pousse">Poussée</button></span>
+    <span class="sous" id="aide-notation"></span>
+  </section>
+
+  <section>
+    <span class="rubrique">Ton équipement</span>
+    <div class="confirmation" id="confirmation" role="status" hidden></div>
+    <div id="resume-equipement"></div>
+    <div class="sous" id="resume-lit"></div>
+    <button type="button" id="ouvrir-equipement">Refaire le questionnaire</button>
+  </section>
+
+  <section>
+    <span class="rubrique">Lire les notes</span>
+    <span class="sous">Sur une fiche, passe la souris sur une note pour voir son résumé. Clique sur la note pour garder le résumé ouvert, puis sur « Pourquoi cette note ? » pour le détail. Un clic ailleurs le referme.</span>
+    <span class="sous">L'étoile marque la meilleure note parmi les versions dans ton profil.</span>
+    <span class="sous">En notation poussée, le résumé dit si les paramètres d'encodage sont vérifiés (publiés dans le MediaInfo) ou non publiés (note d'un encodage moyen, qui peut se tromper dans un sens ou dans l'autre).</span>
+    <span class="sous">Le chiffre est la note sur 100. La couleur ne suit pas la note : elle dit si la version correspond à ton profil.</span>
+    <span class="legende"><i class="pastille v" aria-hidden="true"></i><span><b class="v">Vert</b> : dans ton profil</span></span>
+    <span class="legende"><i class="pastille j" aria-hidden="true"></i><span><b class="j">Jaune</b> : il manque un critère</span></span>
+    <span class="legende"><i class="pastille r" aria-hidden="true"></i><span><b class="r">Rouge</b> : trop lourd pour ton profil</span></span>
+    <span class="legende"><i class="pastille g" aria-hidden="true"></i><span><b class="g">Gris</b> : deux critères manquent, ou plus</span></span>
+    <span class="sous">À la première visite d'une fiche, les notes apparaissent au fil de la lecture (une version toutes les 0,7 s), dès que le format de l'image du film est connu (en notation poussée : quand toutes les versions sont lues) ; l'étoile vient quand tout est lu. Les visites suivantes sont immédiates. « – » : fiche sans MediaInfo, donc sans note. « Bonus » : torrent de bonus seuls, sans le film, donc sans note.</span>
+  </section>
+
+  <footer>
+    <span class="sous" id="memoire">…</span>
+    <button type="button" id="vider">Vider</button>
+  </footer>
+  <details id="bloc-diagnostic">
+    <summary>Un problème d'affichage ?</summary>
+    <span class="sous">Ouvre une fiche de C411, attends les notes, puis clique ici. Le texte ne contient ni clé, ni jeton, ni contenu des fiches : seulement des noms de champs et des comptes.</span>
+    <button type="button" id="diagnostic">Copier le diagnostic</button>
+    <textarea id="texte-diagnostic" rows="7" readonly hidden aria-label="Diagnostic"></textarea>
+  </details>
+</main>
+
+<main id="vue-equipement" hidden>
+  <button type="button" class="retour" id="retour">‹ Retour</button>
+  <h2>Ton équipement</h2>
+  <p class="sous">Les notes vidéo et audio sont les mêmes pour tout le monde. Tes réponses règlent seulement le profil : ce qui compte chez toi. Chaque question peut rester sur « Je ne sais pas ».</p>
+  <div id="questions"></div>
+  <h3>Ce que ça donne</h3>
+  <ul id="resultat"></ul>
+  <div class="pied">
+    <div class="sous" id="effet"></div>
+    <div class="boutons"><button type="button" id="retour-bas">Retour</button><button type="button" class="principal" id="enregistrer-equipement">Enregistrer</button></div>
+  </div>
+</main>
+
+<script src="../moteur/note.js"></script>
+<script src="../moteur/equipement.js"></script>
+<script src="fenetre.js"></script>
+</body>
+</html>

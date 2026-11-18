@@ -20,6 +20,13 @@ Uniquement à partir de ce qui se mesure dans le MediaInfo de chaque version. Ni
 
 Six profils sont fournis : HDLight 1080p (par défaut), 1080p Haute qualité, 4KLight, 4K HDR cinéma, Petit fichier, Qualité maximale. Tu peux les modifier ou en créer d'autres. Le questionnaire **« Ton équipement »** (taille de l'écran, distance, HDR, Dolby Vision…) crée un profil adapté à ta télé.
 
+### Deux notations : rapide et poussée
+
+Dans la fenêtre de l'extension, le réglage **« Notation »** propose deux façons de noter. La fiche ouverte se renote aussitôt quand tu changes.
+
+- **Rapide** (par défaut) : débit, résolution, codec, 10 bits et effort de l'encodeur. Simple et stable.
+- **Poussée** : tient compte en plus des **paramètres d'encodage publiés** dans le MediaInfo (CRF ou 2 passes, réglages qui gardent ou lissent le détail fin) et de la **difficulté du film**, mesurée sur ses versions encodées en x265 avec un CRF : un film plein de grain ou de mouvement demande plus de débit qu'un film calme. Sans paramètres publiés, ou s'ils ont été effacés, la version n'a ni bonus ni malus : elle est notée comme un encodage moyen, et le résumé l'indique (« Paramètres non publiés »). Un remux, un disque complet ou un WEB-DL non ré-encodé reste neutre.
+
 ### Les couleurs
 
 **La couleur ne suit pas la note** : elle dit si la version correspond à ton profil.
@@ -39,7 +46,7 @@ Une version rouge peut donc avoir une meilleure note qu'une jaune : elle est mei
 - ⭐ marque la meilleure note parmi les versions vertes.
 - **Survol** d'une note : un résumé (vidéo, audio, ce qui manque). **Clic** : le résumé reste ouvert. **« Pourquoi cette note ? »** : le détail complet.
 - « – » pas de MediaInfo sur la fiche · « ? » durée ou débit inconnus · « ! » fiche non lue (bouton « Réessayer ») · « Bonus » torrent qui ne contient que les bonus, sans le film.
-- À la première visite, les notes arrivent petit à petit (une fiche lue toutes les 0,67 s). Elles sont ensuite gardées : la fois suivante, tout s'affiche tout de suite.
+- À la première visite, les notes arrivent petit à petit (une fiche lue toutes les 0,67 s). En notation poussée, elles attendent que toutes les versions soient lues (la difficulté du film se mesure sur l'ensemble). Les fiches sont ensuite gardées : la fois suivante, tout s'affiche tout de suite.
 
 ---
 
