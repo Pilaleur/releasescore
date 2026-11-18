@@ -2,6 +2,9 @@
 // et aux pages (<script src="/note.js"> → Note.v2).
 // D'abord les FAITS (note vidéo, note audio : identiques pour tout le monde), ensuite TES PRÉFÉRENCES (profil : note globale).
 // L'ancienne note (qualité brute, facteur de source) a été retirée lors de la refonte (08/11/2026).
+// Deux modes depuis le 18/11/2026 : « rapide » (la note v2) et « poussée » (o.mode = "pousse" : paramètres d'encodage publiés et
+// difficulté du film en plus ; voir NOTATION POUSSÉE plus bas). Les deux : débit demandé en r^0,5 au-dessus du 1080p (facteurPixels).
+// Copie exacte dans l'extension ReleaseScore (moteur/note.js).
 
 (function (racine) {
   const MAXI = { 2160: 95, 1080: 85, 720: 45, 576: 32, 480: 28 }; // maximum de la note vidéo par classe de résolution
@@ -42,6 +45,8 @@
     const EFFORT = { fast: 0.92, medium: 1, slow: 1.06, "slow+": 1.08, slower: 1.1, veryslow: 1.12, placebo: 1.13 };
     function effort(v) {
       const e = v.enc; if (!e) return null;
+      // réglages sans aucun indice d'effort (SVT-AV1, ou seulement le mode de débit) : effort inconnu (comme avant la lecture « l 7 »)
+      if (["subme", "ref", "bframes", "me", "trellis", "rd", "rcla"].every((k) => e[k] == null)) return null;
       if (/x264/i.test(v.lib || "") || e.trellis != null) {
         if (e.subme >= 11) return "placebo"; if (e.subme >= 10 && e.me >= 2) return "veryslow"; if (e.subme >= 9) return "slower";
         if (e.subme >= 8) return "slow"; if (e.subme >= 7) return "medium"; return "fast";
@@ -51,6 +56,10 @@
       if (e.rd >= 3 && e.subme >= 2) return "medium"; return "fast";
     }
     const materiel = (v) => /nvenc|qsv|quick ?sync|amf|vce|videotoolbox/i.test(v.lib || "");
+    // Débit demandé selon les pixels utiles (r = pixels ÷ ceux d'un 1080p) : r^0,75 jusqu'au 1080p, r^0,5 au-dessus
+    // (décision du 18/11/2026, les deux modes : une 4K demande 2 × le débit d'un 1080p, et non 2,83 × ; mesuré à CRF égal sur
+    // 88 versions x265 : 1,9 ×). Sous le 1080p, rien ne change.
+    const facteurPixels = (r) => (r <= 1 ? Math.pow(r, 0.75) : Math.pow(r, 0.5));
     // pixels utiles (stockés) : les bandes noires ne comptent pas (aspect = format de l'image du film) : en haut et en bas
     // (film plus large que l'image), ou sur les côtés (film plus étroit, 4:3 : 12/11/2026) ;
     // anamorphique (par : rapport des pixels) : calcul sur la largeur affichée
@@ -74,19 +83,158 @@
       if (utiles <= b) return MAXI[bas];
       return MAXI[bas] + (MAXI[cls] - MAXI[bas]) * (utiles - b) / (haut - b);
     }
-    // o : { aspect, anim, sans: { pixels, bits, effort, materiel, codec, anim } } (« sans » sert à « Pourquoi cette note ? »)
+    // =================================================================================================================
+    // NOTATION POUSSÉE (18/11/2026 ; analyse : claude/notation-poussee.md). Mode rapide = la note ci-dessus, inchangée ;
+    // le mode poussé (o.mode === "pousse") tient compte en plus des paramètres d'encodage publiés (ligne « Encoding settings »
+    // du MediaInfo, rien d'autre) et de la difficulté du film. Note toujours sur 100, sans dépasser le maximum de la classe.
+    //   - Paramètres absents ou effacés : ni bonus ni malus (encodage moyen : effort moyen observé, détail neutre).
+    //   - Remux, BDMV, WEB-DL (« WEB » dans le nom, règle de nommage de C411) non ré-encodés : neutres (c'est la source).
+    //   - Effets de réglages appliqués au DÉBIT UTILE, jamais à la note : un encodage ne peut pas passer devant sa source.
+    // Calage (collecte du 18/11 : 741 versions de 41 films ; 88 versions x265 en CRF de 36 films ; refait avec l'exposant 0,5) :
+    //   pente 0,145 par point de CRF (le débit double tous les 4,8 points) ; à CRF égal : SAO coupé × 1,30, preset medium ou
+    //   plus rapide × 0,86 ; 4K / 1080p avec l'exposant 0,5 : × 0,89 ± 0,12 (non significatif) ; animation : 0,89 × le débit d'un
+    //   film en prises de vues réelles (6 films, 14 versions), d'où × 0,9 en mode poussé (le mode rapide garde × 0,5).
+    const POUSSE = {
+      PENTE: 0.145, CRF0: 22, REF: 1.2888,   // REF : ln du débit (Mb/s) d'un 1080p utile à CRF 22, moyenne des 30 films en prises de vues réelles
+      SAO_COUPE: 1.30, MEDIUM: 0.86, POIDS: 2.5, DMIN: 0.6, DMAX: 1.6, ANIM: 0.9,
+      EFFORT_INCONNU: { "H.265": 1.05, "H.264": 1.09 },             // moyenne des encodages qui publient leurs réglages (x265 130, x264 111)
+      MODE: { crf: 1, "2pass": 1, abr: 0.9, cbr: 0.85, cqp: 1 },
+      SOURCE: { "WEBRip": 0.93, "HDTV": 0.85 },                       // BluRay, REMUX, BDMV, WEB-DL : 1
+      DETAIL: 0.12, SOMBRE: 1.02, MAXFALL_SOMBRE: 120,
+    };
+    // Source d'après le nom de la release (ou du fichier) : REMUX, BDMV, WEB-DL (« WEB » seul = WEB-DL chez C411), WEBRip, HDTV ; null = encodage
+    function sourceDe(nom) {
+      const t = " " + String(nom || "").toUpperCase().replace(/[._()\[\]+-]+/g, " ") + " ";
+      if (/\sREMUX\s/.test(t)) return "REMUX";
+      if (/\s(BDMV|ISO|COMPLETE BLURAY)\s/.test(t)) return "BDMV";
+      if (/\sWEB ?RIP\s/.test(t)) return "WEBRip";
+      if (/\s(WEB|WEB ?DL)\s/.test(t)) return "WEB-DL";
+      if (/\s(HDTV|PDTV)\s/.test(t)) return "HDTV";
+      return null;
+    }
+    const nonReencode = (v) => !v.enc && ["REMUX", "BDMV", "WEB-DL"].includes(v.source);
+    // paramètres « publiés » : une ligne de réglages lue (mode de débit, ou indices d'effort)
+    const publies = (v) => !!(v.enc && (v.enc.rc || effort(v)));
+    function modeDebit(v) {
+      const e = v.enc; if (!e || !e.rc) return null;
+      const f = POUSSE.MODE[e.rc] ?? 1;
+      const lib = e.rc === "crf" ? `CRF ${String(e.crf ?? "?").replace(".", ",")}` : e.rc === "2pass" ? `2 passes${e.br ? ` à ${Math.round(e.br).toLocaleString("fr-FR")} kb/s` : ""}`
+        : e.rc === "abr" ? "1 passe (débit moyen visé)" : e.rc === "cbr" ? "débit constant (CBR)" : "quantificateur constant (CQP)";
+      return { f, lib };
+    }
+    function vbv(v) {
+      const e = v.enc; if (!e || !(e.vbv > 0) || !(v.video > 0)) return 1;
+      const r = e.vbv / 1000 / v.video;
+      return r < 1.5 ? 0.92 : r < 2.5 ? 0.97 : 1;
+    }
+    // réglages qui gardent ou lissent le détail fin (grain, textures) : score de -0,5 à +0,5
+    function detail(v) {
+      const e = v.enc; if (!e) return { s: 0, lignes: [] };
+      let s = 0; const L = [];
+      const add = (x, t) => { s += x; L.push({ x, t }); };
+      const x264 = /x264/i.test(v.lib || "") || e.trellis != null;
+      if (e.db === -99) add(0.25, "deblock coupé");
+      else if (e.db != null) { if (e.db <= -4) add(0.25, "deblock très abaissé"); else if (e.db <= -2) add(0.15, "deblock abaissé"); else if (e.db > 0) add(-0.15, "deblock renforcé"); }
+      if (e.aqm === 0) add(-0.2, "aq coupé");
+      if (x264) {
+        if (e.psy === false || (e.psyrd != null && e.psyrd < 0.5)) add(-0.3, "psy-rd coupé (lisse)");
+        if (e.psytr > 0) add(0.05, "psy-trellis");
+      } else {
+        if (e.sao === false) add(0.25, "SAO coupé (garde le détail fin)"); else if (e.sao === true) add(-0.25, "SAO actif (lisse le détail fin)");
+        if (e.psyrd != null && e.psyrd < 0.5) add(-0.3, "psy-rd coupé (lisse)");
+        if (e.psyrdoq >= 2) add(0.2, "psy-rdoq élevé (garde le grain)"); else if (e.psyrdoq >= 1) add(0.1, "psy-rdoq actif"); else if (e.psyrdoq === 0) add(-0.05, "psy-rdoq coupé");
+        if (e.sis === true) add(-0.05, "strong-intra-smoothing");
+      }
+      return { s: Math.max(-0.5, Math.min(0.5, s)), lignes: L };
+    }
+    const estSombre = (v) => !!v.hdr && v.hdr !== "SDR" && v.maxfall > 0 && v.maxfall < POUSSE.MAXFALL_SOMBRE;
+    // Difficulté du film (D) : d'après ses versions x265 en CRF. Débit ramené à une image 1080p utile et à CRF 22, corrigé des
+    // réglages qui changent le débit à CRF égal ; moyenne comparée à celle des films de la collecte, rapprochée de 1 quand il y a
+    // peu de versions (poids n / (n + 2,5) : 1 version 29 %, 3 versions 55 %, 10 versions 80 %), bornée à 0,6 – 1,6.
+    // faits : faits des versions de l'œuvre (pleinCadre : IMAX / Open Matte) ; o : { aspect, anim }. -> { D, n, rel } ou { D: 1, n: 0 }
+    function difficulte(faits, o = {}) {
+      const vus = new Set(), z = [];
+      for (const f of faits || []) {
+        const e = f && f.enc;
+        if (!e || e.rc !== "crf" || !(e.crf > 0) || !/x265/i.test(f.lib || "") || !(f.video > 0) || !(f.w > 0) || f.estime) continue;
+        const cle = `${f.w}x${f.h}|${f.video}|${e.crf}`;   // même fichier vu deux fois (ta version et sa fiche C411)
+        if (vus.has(cle)) continue; vus.add(cle);
+        const utiles = f.pleinCadre ? f.w * (f.h || f.w * 9 / 16) : pixelsUtiles(f.w, f.h, o.aspect, f.par);
+        const ef = effort(f);
+        let y = Math.log(f.video / (facteurPixels(utiles / P1080) * (o.anim ? POUSSE.ANIM : 1))) + POUSSE.PENTE * (e.crf - POUSSE.CRF0);
+        if (e.sao === false) y -= Math.log(POUSSE.SAO_COUPE);
+        if (ef === "medium" || ef === "fast") y -= Math.log(POUSSE.MEDIUM);
+        z.push(y);
+      }
+      if (!z.length) return { D: 1, n: 0, rel: null };
+      const n = z.length, rel = Math.exp(z.reduce((a, b) => a + b, 0) / n - POUSSE.REF);
+      return { D: Math.min(POUSSE.DMAX, Math.max(POUSSE.DMIN, Math.pow(rel, n / (n + POUSSE.POIDS)))), n, rel };
+    }
+
+    // o : { aspect, anim, mode ("pousse"), D ({ D, n } : difficulte()), sans: { pixels, bits, effort, materiel, codec, anim,
+    //       + mode poussé : debit, vbv, source, detail, sombre, difficulte } } (« sans » sert à « Pourquoi cette note ? »)
+    // Mode poussé : v.source (sourceDe du nom de la release ou du fichier), v.maxfall (lecteur « l 7 »).
     function noteVideo(v, o = {}) {
       const sans = o.sans || {};
       if (!(v.video > 0) || !(v.w > 0)) return null;
+      const pousse = o.mode === "pousse";
       // plein cadre (IMAX / Open Matte : format variable, l'image remplit le cadre) : tous les pixels comptent
       const cls = classeDe(v), tous = v.w * (v.h || v.w * 9 / 16);
       const utiles = v.pleinCadre ? tous : pixelsUtiles(v.w, v.h, o.aspect, v.par);
       const pix = sans.pixels ? tous : utiles, maxi = maxiDe(cls, utiles, o.aspect, v.pleinCadre);
       const fC = sans.codec ? 1 : (CODEC[v.codec] || 1), fB = !sans.bits && v.bits >= 10 ? 1.05 : 1;
-      const ef = effort(v), fE = !sans.effort && ef ? EFFORT[ef] : 1, fM = !sans.materiel && materiel(v) ? 0.7 : 1;
-      const fA = o.anim && !sans.anim ? 0.5 : 1;
-      const eff = v.video * fC * fB * fE * fM, k = 4 * Math.pow(pix / P1080, 0.75) * fA;
-      return { note: maxi * (1 - Math.exp(-eff / k)), cls, maxi, pix, fC, fB, fE, ef, fM, fA, eff, k };
+      const ef = effort(v), fM = !sans.materiel && materiel(v) ? 0.7 : 1;
+      if (!pousse) {
+        const fE = !sans.effort && ef ? EFFORT[ef] : 1;
+        const fA = o.anim && !sans.anim ? 0.5 : 1;
+        const eff = v.video * fC * fB * fE * fM, k = 4 * facteurPixels(pix / P1080) * fA;
+        return { note: maxi * (1 - Math.exp(-eff / k)), cls, maxi, pix, fC, fB, fE, ef, fM, fA, eff, k };
+      }
+      // ---- mode poussé ----
+      const source = nonReencode(v) ? "non ré-encodée" : publies(v) ? "verifies" : "non publies";
+      const fE = sans.effort ? 1 : ef ? EFFORT[ef] : nonReencode(v) || materiel(v) ? 1 : (POUSSE.EFFORT_INCONNU[v.codec] || 1);
+      const md = modeDebit(v), fMd = !sans.debit && md ? md.f : 1, fV = sans.vbv ? 1 : vbv(v);
+      const fS = sans.source ? 1 : (POUSSE.SOURCE[v.source] || 1);
+      const fA = o.anim && !sans.anim ? POUSSE.ANIM : 1;
+      const D = !sans.difficulte && o.D && o.D.D > 0 ? o.D.D : 1;
+      const k = 4 * facteurPixels(pix / P1080) * fA * D;
+      const eff0 = v.video * fC * fB * fE * fM * fMd * fV * fS;
+      const base = maxi * (1 - Math.exp(-eff0 / k));
+      // les réglages du détail ne comptent qu'avec assez de débit : 0 sous 60 % du maximum, tout au-dessus de 90 % (à bas débit,
+      // lisser est un choix défendable)
+      const poidsDetail = Math.max(0, Math.min(1, (base / maxi - 0.6) / 0.3));
+      const d = detail(v), fD = sans.detail ? 1 : 1 + POUSSE.DETAIL * d.s * poidsDetail;
+      const sombre = estSombre(v), fSom = !sans.sombre && sombre && v.enc && v.enc.aqm === 3 ? POUSSE.SOMBRE : 1;
+      const eff = eff0 * fD * fSom;
+      return { note: maxi * (1 - Math.exp(-eff / k)), cls, maxi, pix, fC, fB, fE, ef, fM, fA, eff, k,
+        pousse: { source, md, fMd, fV, fS, D, Dn: o.D ? o.D.n : 0, base, poidsDetail, d, fD, sombre, fSom } };
+    }
+    // Lignes de « Pourquoi cette note ? » propres au mode poussé, pour les trois pages (Rechercher, Ma bibliothèque, extension) :
+    // [{ lib, pts (effet sur la note vidéo, en points ; null = rien à chiffrer) }] et la mention des paramètres.
+    function lignesPoussee(v, o, NV) {
+      const P = NV && NV.pousse; if (!P) return null;
+      const sans = (s) => { const n = noteVideo(v, { ...o, sans: s }); return n ? NV.note - n.note : 0; };
+      const nb2 = (x) => Number(x).toLocaleString("fr-FR", { maximumFractionDigits: 2 });
+      const L = [];
+      if (!NV.ef) L.push(P.source === "non ré-encodée" ? { lib: `${v.source} non ré-encodé : effort compté × 1 (c'est la source)`, pts: null }
+        : materiel(v) ? { lib: "Encodeur matériel : effort compté × 1", pts: null }
+        : POUSSE.EFFORT_INCONNU[v.codec] ? { lib: `Effort inconnu : moyenne des encodages ${v.codec === "H.265" ? "x265" : "x264"} (× ${nb2(NV.fE)})`, pts: sans({ effort: true }) }
+        : { lib: `Effort inconnu (aucune moyenne mesurée en ${v.codec || "ce codec"}) : compté × 1`, pts: null });
+      if (P.md) L.push({ lib: `Mode de débit : ${P.md.lib}${P.fMd !== 1 ? ` (× ${nb2(P.fMd)})` : ""}`, pts: P.fMd !== 1 ? sans({ debit: true }) : null });
+      if (P.fV !== 1) L.push({ lib: `Plafond VBV serré : ${Math.round(v.enc.vbv).toLocaleString("fr-FR")} kb/s (× ${nb2(P.fV)})`, pts: sans({ vbv: true }) });
+      if (P.fS !== 1) L.push({ lib: `Source ${v.source} (× ${nb2(P.fS)})`, pts: sans({ source: true }) });
+      L.push(P.Dn > 0 ? { lib: `Difficulté du film : ${nb2(P.D)} (${P.Dn} version${P.Dn > 1 ? "s" : ""} x265 en CRF)`, pts: sans({ difficulte: true }) }
+        : { lib: "Difficulté du film inconnue (aucune version x265 en CRF) : comptée 1", pts: null });
+      if (P.d.lignes.length) {
+        const t = P.d.lignes.map((x) => `${x.x > 0 ? "+" : "−"}${nb2(Math.abs(x.x))} ${x.t}`).join(", ");
+        L.push(P.poidsDetail > 0 ? { lib: `Détail : ${t} (× ${nb2(P.fD)}${P.poidsDetail < 1 ? `, effet réduit de ${Math.round(100 - 100 * P.poidsDetail)} % : débit juste` : ""})`, pts: sans({ detail: true }) }
+          : { lib: `Détail : ${t} (sans effet : débit trop bas pour le détail fin)`, pts: null });
+      }
+      if (P.fSom !== 1) L.push({ lib: `Film sombre (HDR, MaxFALL ${Math.round(v.maxfall)} cd/m²) et aq-mode 3 (× ${nb2(P.fSom)})`, pts: sans({ sombre: true }) });
+      const mention = P.source === "verifies" ? "Paramètres vérifiés : la note tient compte des réglages publiés dans le MediaInfo."
+        : P.source === "non publies" ? "Paramètres non publiés — note calculée sur un encodage moyen : elle peut sous-estimer ou surestimer cette version."
+        : `${v.source} : flux d'origine, sans réglages d'encodage à juger.`;
+      return { lignes: L, mention, verifies: P.source === "verifies" };
     }
     // débit courant d'une piste dont le débit est inconnu (kb/s, par type)
     const DEBIT_TYPIQUE = { "E-AC3": 640, AC3: 448, DTS: 1509, AAC: 192, "HE-AAC": 128, Opus: 192, "?": 384 };
@@ -168,13 +316,17 @@
       bon: { piste: { format: "Dolby Digital Plus with Dolby Atmos", brut: "E-AC-3 JOC", canaux: 6, debit: 768 }, mbps: 1.5 },
       sansperte: { piste: { format: "Dolby TrueHD with Dolby Atmos", brut: "MLP FBA", canaux: 8, debit: 3690 }, mbps: 4.5 } };
 
-    // Ton fichier idéal : H.265 10 bits à la cible du profil (moins l'audio de l'idéal), au format du film
+    // Ton fichier idéal : H.265 10 bits à la cible du profil (moins l'audio de l'idéal), au format du film.
+    // Mode poussé : encodé avec de bons paramètres (x265 preset slower, CRF, SAO coupé, deblock abaissé, psy-rdoq actif), sinon
+    // le plafond de 100 % de l'idéal effacerait le bonus des versions bien réglées. Même difficulté de film que les versions (o.D).
+    const ENC_IDEAL = { subme: 4, me: 3, rd: 4, ref: 5, bframes: 8, rcla: 60, rc: "crf", crf: 20, sao: false, db: -2, psyrd: 2, psyrdoq: 1, aqm: 2, sis: false };
     function ideal(r, o = {}) {
       const audio = AUDIO_IDEAL[r.audio] || AUDIO_IDEAL.correct, a = notePiste(audio.piste).note;
       if (!(r.cible > 0)) return { video: MAXI[+r.res] * 0.99, audio: a, debit: null };
       const w = r.res === "2160" ? 3840 : 1920, h = r.res === "2160" ? 2160 : 1080;
       const debit = Math.max(0.3, r.cible * 8000 / 3600 - audio.mbps);
-      const v = noteVideo({ w, h, bits: 10, codec: "H.265", video: debit, lib: "", enc: null }, o).note;
+      const pousse = o.mode === "pousse";
+      const v = noteVideo({ w, h, bits: 10, codec: "H.265", video: debit, lib: pousse ? "x265" : "", enc: pousse ? ENC_IDEAL : null }, o).note;
       return { video: v, audio: a, debit };
     }
     const nb = (x, n = 1) => Number(x).toLocaleString("fr-FR", { minimumFractionDigits: n, maximumFractionDigits: n });
@@ -265,7 +417,8 @@
     function aspectOeuvre(faits) {
       return aspectDe((faits || []).filter((f) => f && f.w >= 1200 && f.h > 0 && !f.estime).map((f) => largeurAffichee(f) / f.h)); // anamorphique : largeur affichée
     }
-    return { classe, classeDe, largeurAffichee, maxiDe, effort, materiel, pixelsUtiles, noteVideo, notePiste, ideal, juger, verdict, aspectOeuvre, aspectDe, equipement, selon, applique, estDts, sousTitres, PROFILS, CHAMPS, AUDIO_IDEAL, LANG, EFFORT };
+    return { classe, classeDe, largeurAffichee, maxiDe, effort, materiel, pixelsUtiles, facteurPixels, noteVideo, notePiste, ideal, juger, verdict, aspectOeuvre, aspectDe, equipement, selon, applique, estDts, sousTitres, PROFILS, CHAMPS, AUDIO_IDEAL, LANG, EFFORT,
+      sourceDe, difficulte, lignesPoussee, POUSSE, MODES: [["rapide", "Rapide"], ["pousse", "Poussée"]] };
   })();
 
   const N = { MAXI, v2: V2 };

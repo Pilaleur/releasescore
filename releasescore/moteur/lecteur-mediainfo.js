@@ -20,18 +20,22 @@
 // Résultat (environ 300 octets en JSON) :
 //   { lu: "mediainfo" | "bdinfo", conteneur (« Matroska », « AVI », « MPEG-4 »…), duree (min), w, h, bits, hdr ("SDR" | "HDR10" | "HDR10+" | "HLG" | "DV + HDR10" | "DV + HDR10+" | "DV seul"),
 //     codec ("H.264" | "H.265" | "AV1" | "XviD" | autre), video (Mb/s), videoEtiquette (Mb/s), videoMesure ("taille" | "etiquette"),
-//     lib (encodeur vidéo : « x265 4.1… », vide si inconnu), enc ({ subme, me, trellis, rd, ref, bframes, rcla } ou null),
+//     lib (encodeur vidéo : « x265 4.1… », vide si inconnu), enc ({ subme, me, trellis, rd, ref, bframes, rcla, + réglages de la
+//     notation poussée : voir lireReglages } ou null), maxfall (HDR, cd/m², si le MediaInfo le donne),
 //     reglages ({ mode, psyrd, aq, sao } ou null : pour information),
 //     pistes: [{ format (nom commercial), brut (format MediaInfo), canaux, debit (kb/s), langue ("vff" | "vfq" | "vfb" | "vo" | "autre"),
 //                role ("" | "AD" | "commentaire"), titre }],
 //     st: [{ langue ("fr" ou code à 2 lettres, "?" inconnue), force (sous-titres forcés : seulement les passages en langue étrangère),
 //            sdh (pour sourds et malentendants) }] (lot VOSTFR, 11/11/2026 ; [] = aucun sous-titre) }
 //     par (fichier anamorphique seulement : rapport des pixels, d'après « Display aspect ratio »),
-//     l: 5 (lecture du 12/11/2026 : « Bitrate » en un mot (l 2), format d'affichage (l 3), débit déduit du débit global,
+//     l: 6 (lecture du 12/11/2026 : « Bitrate » en un mot (l 2), format d'affichage (l 3), débit déduit du débit global,
 //     présentation « :> » et langue absente = « ? » (l 4) ; 17/11/2026 : torrent à plusieurs fichiers, le plus long (l 5),
 //     avec « nf » = nombre de fichiers décrits quand il y en a plusieurs ; 17/11/2026, soir (l 6) : « dtot » = somme des durées
-//     des fichiers (min) et « vmoy » = débit vidéo moyen pondéré par la durée (Mb/s), pour les séries ; voir aRelire)
-// Version de l'extension « ReleaseScore » (ex « Notes C411 ») : identique à interface/lecteur-mediainfo.js de l'outil, plus les règles « l 5 » et « l 6 ».
+//     des fichiers (min) et « vmoy » = débit vidéo moyen pondéré par la durée (Mb/s), pour les séries ; 18/11/2026 (l 7) : réglages
+//     d'encodage complets dans « enc » (voir lireReglages) et « maxfall » (HDR : luminosité moyenne maximale, cd/m²), pour la
+//     notation poussée ; voir aRelire)
+// Version de l'extension « ReleaseScore » (ex « Notes C411 ») : identique à interface/lecteur-mediainfo.js de l'outil, sauf aRelire :
+// ici, seules les fiches à plusieurs fichiers lues avant « l 6 » sont relues (l'outil relit toutes celles lues avant « l 6 »).
 // ou null si le texte n'est ni un MediaInfo ni un BDInfo lisible.
 // Faits lus avant le lot VOSTFR : pas de « st » (fiches-c411.js relit la fiche quand la version s'affiche).
 
@@ -148,31 +152,64 @@
     : /MPEG-4 Visual|XviD|DivX/i.test(f) ? "XviD" : /VP9/i.test(f) ? "VP9" : /MPEG Video|MPEG-2/i.test(f) ? "MPEG-2" : String(f || "") || null;
 
   // ---------- paramètres d'encodage x264 / x265 ----------
+  // enc : réglages utiles à la note. Effort (les deux modes) : subme, me, trellis, rd, ref, bframes, rcla.
+  // Notation poussée (18/11/2026, lecture « l 7 ») : rc ("crf" | "2pass" | "abr" | "cbr" | "cqp"), crf, br (débit visé, kb/s),
+  // vbv (plafond VBV, kb/s), sao (x265 : true / false), db (somme des deux réglages du deblock ; -99 = deblock coupé),
+  // psyrd, psyrdoq (x265), psytr (psy-trellis, x264), psy (x264 : false = psy coupé), aqm (mode d'aq), sis (x265 : strong-intra-smoothing),
+  // svt (SVT-AV1 écrit par ffmpeg : « libsvtav1 CRF=22.0 preset=5 », preset). Un réglage absent du texte : null (non compté).
   const ME_X264 = { dia: 0, hex: 1, umh: 2, esa: 3, tesa: 4 };
+  const virgule = (x) => String(x).replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "").replace(".", ",");
   function lireReglages(texte, lib) {
     if (!texte) return { enc: null, reglages: null };
+    const t = String(texte);
+    // SVT-AV1 par ffmpeg : une seule ligne « libsvtav1 CRF=22.0 preset=5 pix_fmt=… » (pas de « / »)
+    const svt = t.match(/svtav1\b.*?\bcrf=(\d+(?:\.\d+)?)/i);
+    if (svt && !/\s\/\s/.test(t)) {
+      const preset = (t.match(/\bpreset=(-?\d+)/i) || [])[1];
+      return { enc: { rc: "crf", crf: Number(svt[1]), svt: preset != null ? Number(preset) : null },
+        reglages: { mode: `CRF ${virgule(svt[1])}${preset != null ? ` (SVT-AV1, preset ${preset})` : ""}`, psyrd: null, aq: null, sao: null } };
+    }
     const p = {};
-    for (const morceau of String(texte).split(/\s\/\s/)) {
+    for (const morceau of t.split(/\s\/\s/)) {
       const i = morceau.indexOf("=");
       if (i < 0) p[morceau.trim()] = true; else p[morceau.slice(0, i).trim()] = morceau.slice(i + 1).trim();
     }
     const x264 = /x264/i.test(lib || "") || p.trellis != null;
     const num = (k) => (p[k] == null || p[k] === true ? null : nombre(p[k]));
+    // mode de débit : CRF, ou débit visé (1 ou 2 passes, CBR). x265 récent : « rc=abr » + « stats-read=2 » en 2e passe ;
+    // x265 ancien : « rc=2 » + « pass » ; x264 : « rc=2pass », « rc=abr », « rc=cbr », « rc=crf ».
+    const rc0 = String(p.rc || "").toLowerCase().replace(/\s+/g, "");
+    const passes = rc0 === "2pass" || Number(p["stats-read"]) >= 1 || Number(p.pass) === 2 || (p.pass === true && p.bitrate != null);
+    const crf = num("crf");
+    const rc = passes ? "2pass" : rc0 === "crf" || (crf != null && !["abr", "cbr", "cqp"].includes(rc0) && p.bitrate == null) ? "crf"
+      : rc0 === "cbr" ? "cbr" : rc0 === "cqp" ? "cqp" : rc0 === "abr" || p.bitrate != null ? "abr" : null;
+    const psyrdBrut = p["psy-rd"] ?? (p.psy_rd != null && p.psy_rd !== true ? String(p.psy_rd).split(":")[0] : null);
+    const psytr = x264 && p.psy_rd != null && p.psy_rd !== true ? nombre(String(p.psy_rd).split(":")[1]) : null;
+    // deblock : x265 « deblock=-2:-2 » (ou « no-deblock ») ; x264 « deblock=1:-3:-3 » (1er chiffre : activé)
+    let db = null;
+    if (p["no-deblock"] === true) db = -99;
+    else if (p.deblock != null) {
+      const d = String(p.deblock === true ? "0:0" : p.deblock).split(":").map(Number);
+      if (x264 && d.length >= 3) db = d[0] === 0 ? -99 : d[1] + d[2]; else if (d.length >= 2 && d.every(Number.isFinite)) db = d[0] + d[1];
+    }
+    const aqm = p["aq-mode"] != null ? num("aq-mode") : p.aq != null && p.aq !== true ? nombre(String(p.aq).split(":")[0]) : null;
+    const vbv = num("vbv-maxrate") ?? num("vbv_maxrate");
     const enc = {
       subme: num("subme"), ref: num("ref"), bframes: num("bframes"),
       me: x264 ? (ME_X264[String(p.me || "").toLowerCase()] ?? null) : num("me"),
       trellis: x264 ? num("trellis") : null, rd: x264 ? null : num("rd"),
       rcla: num("rc-lookahead") ?? num("rc_lookahead"),
+      rc, crf: rc === "crf" ? crf : null, br: rc !== "crf" ? num("bitrate") : null, vbv: vbv > 0 ? vbv : null,
+      sao: x264 ? null : p["no-sao"] === true ? false : p.sao === true ? true : null,
+      db, psyrd: psyrdBrut != null ? nombre(psyrdBrut) : null, psyrdoq: x264 ? null : num("psy-rdoq"), psytr,
+      psy: x264 && p.psy != null ? Number(p.psy) !== 0 : null, aqm,
+      sis: x264 ? null : p["no-strong-intra-smoothing"] === true ? false : p["strong-intra-smoothing"] === true ? true : null,
     };
-    // mode de débit : CRF, ou débit visé (1 ou 2 passes)
-    const rc = String(p.rc || "").toLowerCase();
-    const passes = rc === "2pass" || Number(p["stats-read"]) >= 1 || Number(p.pass) === 2;
-    const mode = rc === "crf" || p.crf != null && rc !== "abr" && rc !== "2pass" ? `CRF ${String(p.crf).replace(/\.0+$/, "").replace(".", ",")}`
-      : p.bitrate != null ? `débit visé ${Math.round(nombre(p.bitrate)).toLocaleString("fr-FR")} kb/s${passes ? ", 2 passes" : ""}` : rc ? rc.toUpperCase() : null;
-    const psyrd = p["psy-rd"] ?? (p.psy_rd ? String(p.psy_rd).split(":")[0] : null);
+    const mode = rc === "crf" ? `CRF ${p.crf != null && p.crf !== true ? virgule(p.crf) : "?"}`
+      : p.bitrate != null ? `débit visé ${Math.round(nombre(p.bitrate)).toLocaleString("fr-FR")} kb/s${passes ? ", 2 passes" : rc === "cbr" ? ", CBR" : ", 1 passe"}` : rc0 ? rc0.toUpperCase() : null;
     const aq = p["aq-mode"] != null ? `mode ${p["aq-mode"]}, force ${p["aq-strength"] ?? "?"}` : p.aq ? `mode ${String(p.aq).split(":")[0]}, force ${String(p.aq).split(":")[1] ?? "?"}` : null;
-    const sao = p.sao === true ? "oui" : p["no-sao"] === true ? "non" : null;
-    return { enc, reglages: { mode, psyrd: psyrd != null ? String(psyrd).replace(/\.?0+$/, "").replace(".", ",") : null, aq: aq ? aq.replace(/\.00\b/, "").replace(".", ",") : null, sao } };
+    const sao = enc.sao === true ? "oui" : enc.sao === false ? "non" : null;
+    return { enc, reglages: { mode, psyrd: psyrdBrut != null ? String(psyrdBrut).replace(/\.?0+$/, "").replace(".", ",") : null, aq: aq ? aq.replace(/\.00\b/, "").replace(".", ",") : null, sao } };
   }
 
   // ---------- MediaInfo (anglais ou français) ----------
@@ -257,6 +294,8 @@
     const fiable = mesure && (!etiquette || (mesure < etiquette / 1000 * 3 && mesure > etiquette / 1000 / 3));
     const lib = champ(vid, "Writing library", "Bibliothèque utilisée") || "";
     const { enc, reglages } = lireReglages(champ(vid, "Encoding settings", "Paramètres d'encodage"), lib);
+    // luminosité moyenne de l'image la plus lumineuse (HDR, cd/m²) : film sombre sous 120 (notation poussée, 18/11/2026)
+    const maxfall = nombre(champ(vid, "Maximum Frame-Average Light Level", "MaxFALL", "Niveau de luminosité moyen du contenu", "MaxFALL_Original"));
     const pistes = S.filter((s) => s.nom === "audio").map(({ champs: a }) => {
       const dA = minutes(champ(a, "Duration", "Durée")) || duree;
       const tA = octets(champ(a, "Stream size", "Taille du flux"));
@@ -286,7 +325,7 @@
       codec: codecDe(champ(vid, "Format")), video: arrondi(video, 2),
       videoEtiquette: etiquette != null ? arrondi(etiquette / 1000, 2) : null, videoMesure,
       lib: /x26[45]|nvenc|qsv|quick ?sync|amf|vce|videotoolbox|svt|rav1e|aom|xvid|divx/i.test(lib) ? lib.slice(0, 60) : "",
-      enc: enc && Object.values(enc).some((x) => x != null) ? enc : null, reglages, pistes, st, ...(S.nf > 1 ? { nf: S.nf } : {}), l: 6,
+      enc: enc && Object.values(enc).some((x) => x != null) ? enc : null, reglages, ...(maxfall > 0 ? { maxfall } : {}), pistes, st, ...(S.nf > 1 ? { nf: S.nf } : {}), l: 7,
     };
   }
 
@@ -341,7 +380,7 @@
       lu: "bdinfo", conteneur: "BDAV", duree: duree ? Math.round(duree * 10) / 10 : null, w: res >= 2000 ? 3840 : res >= 1000 ? 1920 : res >= 700 ? 1280 : 720, h: res || null,
       bits: nombre((descV.match(/(\d+) bits/) || [])[1]) || 8, hdr, codec: codecDe(codecV),
       video: arrondi(Number(String(debitV).replace(/[^\d.]/g, "")) / 1000, 2), videoEtiquette: null, videoMesure: "bdinfo",
-      lib: "", enc: null, reglages: null, pistes, st, l: 6,
+      lib: "", enc: null, reglages: null, pistes, st, l: 7,
     };
   }
   const arrondi = (x, n = 1) => (x == null || !Number.isFinite(x) ? null : Math.round(x * 10 ** n) / 10 ** n);
@@ -363,7 +402,9 @@
   const aRelire = (f) => !!f && (f.st === undefined || (!(f.video > 0) && !(f.l >= 4))
     || (!(f.l >= 3) && f.lu === "mediainfo" && f.w > 0 && f.h > 0 && f.w / f.h < 1.7)
     || (!(f.l >= 4) && (f.pistes || []).length > 0 && f.pistes.every((x) => x.langue === "autre"))
-    || (f.nf > 1 && !(f.l >= 6)));   // l 6 (17/11/2026, soir) : durée totale et débit moyen des fichiers (séries)
+    || (f.nf > 1 && !(f.l >= 6))   // l 6 (17/11/2026, soir) : durée totale et débit moyen des fichiers (séries)
+    || (!(f.l >= 7) && f.reglages != null));   // l 7 (18/11/2026, notation poussée) : réglages d'encodage complets et MaxFALL ;
+                       // seules les fiches qui avaient des réglages sont relues (environ une sur trois), les autres n'ont rien de plus à lire
   // lireLangue, lireSousTitre : aussi pour la base du NAS (recherche-c411.js)
   const M = { lire, aRelire, sections, blocs, kbps, octets, minutes, hdrDe, lireReglages, vfDefaut, lireLangue, lireSousTitre, unique };
   if (typeof module === "object" && module.exports) module.exports = M;

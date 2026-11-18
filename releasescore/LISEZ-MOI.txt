@@ -1,4 +1,4 @@
-ReleaseScore — extension pour Chrome (version 0.2.1, 18/11/2026)
+ReleaseScore — extension pour Chrome (version 0.3.0, 18/11/2026)
 ==================================================================
 
 Ce qu'elle fait
@@ -19,6 +19,19 @@ Mettre à jour
      dossier serait une nouvelle extension, sans tes profils ni les fiches déjà lues.
   2. Dans chrome://extensions, cliquer la flèche ronde de la carte de l'extension.
   3. Recharger les fiches de C411 ouvertes (F5). Profils et équipement sont conservés.
+
+Nouveautés de la 0.3.0
+  - Nouveau réglage « Notation » dans la fenêtre de l'extension : « Rapide » (par défaut, la note d'avant) ou « Poussée ».
+    La notation poussée tient compte en plus des paramètres d'encodage publiés dans le MediaInfo (mode de débit : CRF,
+    2 passes, 1 passe, CBR ; plafond VBV ; réglages qui gardent ou lissent le détail fin) et de la difficulté du film,
+    mesurée sur ses versions x265 en CRF. Sans paramètres publiés (ou effacés) : ni bonus ni malus, note d'un encodage
+    moyen ; le résumé l'indique (« Paramètres vérifiés » ou « Paramètres non publiés »). Remux, BDMV et WEB-DL non
+    ré-encodés : neutres. En notation poussée, les notes d'une fiche s'affichent quand toutes ses versions sont lues.
+  - Les deux notations : une 4K demande maintenant 2 fois le débit d'un 1080p (avant : 2,8 fois). Les notes vidéo des
+    versions 4K montent (4KLight : environ + 8 à + 10 points) ; avec un profil 4K, les versions 1080p perdent 2 à 4 points
+    (l'idéal 4K est mieux noté). Rien ne change pour le 1080p et en dessous avec un profil 1080p.
+  - Les fiches déjà gardées qui avaient des réglages d'encodage (environ une sur trois) sont relues une fois, à la
+    prochaine visite (lecture plus complète des réglages).
 
 Nouveautés de la 0.2.1
   - Nouveau logo : icônes de l'extension (16, 32, 48 et 128 px) et logo en haut de la fenêtre. Rien d'autre ne change.
@@ -69,4 +82,4 @@ Fichiers
   moteur/lecteur-mediainfo.js      lecture du MediaInfo (comme LibraryScore ; torrent à plusieurs fichiers : le plus long ; séries : durée totale et débit moyen)
   moteur/equipement.js             règles du questionnaire « Ton équipement » (identique à LibraryScore)
   contenu/fiche.js                 repérage du bloc « Versions », lecture des fiches, notes et bulles
-  fenetre/                         la fenêtre de l'extension (profil, équipement, explications, mémoire, diagnostic)
+  fenetre/                         la fenêtre de l'extension (profil, notation, équipement, explications, mémoire, diagnostic)

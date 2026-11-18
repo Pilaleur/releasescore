@@ -3,6 +3,7 @@
 //   profil      { nom, r (réglages), affiche (nom montré : « … (modifié) ») } : lu par contenu/fiche.js, qui renote aussitôt
 //   profils     { nom: réglages } : tes profils enregistrés
 //   equipement  réponses du questionnaire (règles : moteur/equipement.js, les mêmes que l'outil)
+//   notation    « rapide » (par défaut) ou « pousse » (0.3.0) : lu par contenu/fiche.js, qui renote aussitôt
 //   f:<empreinte>  une fiche lue (écrite par contenu/fiche.js)
 
 (() => {
@@ -182,6 +183,18 @@
     conf.hidden = false;
   });
 
+  // ---------- notation rapide / poussée (0.3.0) ----------
+  let notation = "rapide";
+  const AIDE_NOTATION = {
+    rapide: "Rapide : débit, résolution, codec, 10 bits, effort de l'encodeur. Simple et stable, conseillée pour commencer.",
+    pousse: "Poussée : tient compte en plus des paramètres d'encodage publiés dans le MediaInfo (CRF, 2 passes, réglages qui gardent le détail) et de la difficulté du film, mesurée sur ses versions en CRF. Sans paramètres publiés : note d'un encodage moyen. Sur une fiche, les notes attendent que toutes les versions soient lues.",
+  };
+  function dessinerNotation() {
+    for (const b of $("notation").querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.dataset.mode === notation));
+    $("aide-notation").textContent = AIDE_NOTATION[notation];
+  }
+  for (const b of $("notation").querySelectorAll("button")) b.addEventListener("click", () => { notation = b.dataset.mode; ecrire({ notation }); dessinerNotation(); });
+
   // ---------- mémoire des fiches, état, diagnostic ----------
   async function compter() {
     const tout = await lire(null), n = Object.keys(tout).filter((k) => k.startsWith("f:")).length;
@@ -220,7 +233,8 @@
 
   // ---------- départ ----------
   (async () => {
-    const v = await lire(["profil", "profils", "equipement"]);
+    const v = await lire(["profil", "profils", "equipement", "notation"]);
+    notation = v.notation === "pousse" ? "pousse" : "rapide"; dessinerNotation();
     profils = v.profils && typeof v.profils === "object" ? v.profils : {};
     equipement = v.equipement && typeof v.equipement === "object" ? v.equipement : {};
     V2.equipement(equipement);

@@ -11,6 +11,9 @@
 //     se déduit de l'ensemble des versions : une note affichée avant pourrait encore bouger).
 //
 // Les notes sont celles de l'outil (moteur/note.js, moteur/lecteur-mediainfo.js : mêmes fichiers).
+// Notation (0.3.0, 18/11/2026) : « rapide » (par défaut) ou « poussée » (réglage « notation » de la fenêtre). En mode poussé, la note
+// tient compte des paramètres d'encodage publiés et de la difficulté du film, mesurée sur ses versions x265 en CRF : les notes
+// attendent que toutes les fiches du bloc soient lues (la difficulté se mesure sur l'ensemble ; pas de note qui bouge ensuite).
 // Lecture des fiches : depuis la page, avec la session du navigateur (aucune clé API, rien n'est envoyé ailleurs qu'à C411) :
 //   GET /api/torrents/<empreinte>            -> nom, taille, NFO / MediaInfo (metadata.nfoContent), langue, fiche TMDB
 //   GET /api/torrents/<empreinte>/mediainfo  -> { content } : seulement si la première réponse n'a pas de MediaInfo lisible
@@ -44,7 +47,9 @@
     ecrire: (o) => new Promise((res) => { try { chrome.storage.local.set(o, () => { void chrome.runtime.lastError; res(); }); } catch (e) { res(); } }),
   };
   let PROFIL = { nom: PROFIL_DEFAUT, affiche: PROFIL_DEFAUT, r: { ...V2.PROFILS[PROFIL_DEFAUT] } };
+  let MODE = "rapide";          // « rapide » ou « pousse » (fenêtre de l'extension, clé « notation »)
   function reglages(v) {
+    if ("notation" in v) MODE = v.notation === "pousse" ? "pousse" : "rapide";
     if ("profil" in v) {
       const p = v.profil;
       PROFIL = p && p.r ? { nom: p.nom || PROFIL_DEFAUT, affiche: p.affiche || p.nom || PROFIL_DEFAUT, r: { ...V2.PROFILS[PROFIL_DEFAUT], ...p.r } }
@@ -311,12 +316,19 @@
     // que 16:9) a été lue, ou quand tout est lu. Ensuite, une version plus large lue plus tard peut encore la faire bouger
     // d'un point (mesuré sur La Femme de ménage : 2,388 puis 2,400). Étoile : seulement quand tout est lu.
     const aspect = V2.aspectOeuvre(lignes.map((l) => FICHES.get(l.hash)).filter((e) => e && e.f).map((e) => e.f));
-    FORMAT_CONNU = PRET || Math.abs(aspect - 16 / 9) > 0.01;
+    // notation poussée : la difficulté du film se mesure sur toutes les versions, les notes attendent donc la fin de la lecture
+    FORMAT_CONNU = MODE === "pousse" ? PRET : PRET || Math.abs(aspect - 16 / 9) > 0.01;
     if (!FORMAT_CONNU) return;
     const o = oeuvre(lignes);
-    const ctx = { aspect, anim: !!o.anim, vo: o.vo || null };
-    ctx.I = V2.ideal(PROFIL.r, ctx);
     const film = o.film ? dureeFilm(o, lignes) : null;
+    const ctx = { aspect, anim: !!o.anim, vo: o.vo || null };
+    if (MODE === "pousse") {
+      // difficulté du film : ses versions x265 en CRF (sans les bonus seuls) ; série : versions de la saison affichée
+      const faitsD = lignes.map((l) => FICHES.get(l.hash)).filter((e) => e && e.f && !(film && MOT_BONUS.test(e.nom || "") && e.f.duree > 0 && e.f.duree < 0.7 * film.min))
+        .map((e) => ({ ...(!o.film && e.f.nf > 1 && e.f.vmoy > 0 ? { ...e.f, video: e.f.vmoy } : e.f), pleinCadre: !!e.f.pleinCadre || PLEIN_CADRE.test(e.nom || "") }));
+      ctx.mode = "pousse"; ctx.D = V2.difficulte(faitsD, ctx);
+    }
+    ctx.I = V2.ideal(PROFIL.r, ctx);
     for (const l of lignes) {
       const e = FICHES.get(l.hash);
       if (!e) { if (ERREURS.has(l.hash)) RESULTATS.set(l.hash, { type: "erreur", message: ERREURS.get(l.hash) }); continue; }
@@ -330,9 +342,9 @@
       const duree = o.film ? (f.duree || o.runtime || 120) : saison ? f.dtot : (dureeParDebit(f, e.taille) || f.duree || null);
       const avi = f.conteneur ? /^AVI/i.test(f.conteneur) : AVI_TITRE.test(e.nom || "");
       const pleinCadre = !!f.pleinCadre || PLEIN_CADRE.test(e.nom || "");
-      const j = duree > 0 && e.taille > 0 ? V2.juger({ ...f, taille: e.taille, duree, avi, pleinCadre }, PROFIL.r, ctx.I, ctx) : null;
+      const j = duree > 0 && e.taille > 0 ? V2.juger({ ...f, taille: e.taille, duree, avi, pleinCadre, source: V2.sourceDe(e.nom) }, PROFIL.r, ctx.I, ctx) : null;
       if (!j) { RESULTATS.set(l.hash, { type: "inconnue" }); continue; }
-      j.plein = pleinCadre;
+      j.plein = pleinCadre; j.source = V2.sourceDe(e.nom);
       const nManque = j.crit.filter((c) => !c.ok && !c.poids).length, auDessus = j.crit.some((c) => !c.ok && c.poids);
       const couleur = auDessus ? "r" : nManque === 0 ? "v" : nManque === 1 ? "j" : "g";
       RESULTATS.set(l.hash, { type: "note", j, f, e, ctx, note: Math.round(j.globale), couleur, saison, duree });
@@ -379,6 +391,7 @@
 .manque{color:var(--j-t)}
 :host([data-theme=clair]) .manque{color:#92400e}
 .info{color:var(--doux);font-size:12px}
+.info.mention{margin:0 0 4px}
 .plus{font:inherit;font-size:13px;min-height:32px;padding:0;border:0;background:none;color:var(--lien);text-align:left;cursor:pointer}
 .plus:focus-visible{outline:2px solid var(--anneau);outline-offset:2px;border-radius:4px}
 .detail{display:flex;flex-direction:column;gap:10px;border-top:1px solid var(--trait);padding-top:10px}
@@ -465,9 +478,10 @@
   const li = (a, b, cls) => { const x = el("li", cls || ""); x.append(el("span", "", a), el("span", "", b)); return x; };
   function detailDe(x) {
     const { j, f, ctx, e, saison, duree } = x, NV = j.NV, d = el("div", "detail");
-    const fv = j.plein ? { ...f, pleinCadre: true } : f;
+    const fv = { ...f, ...(j.plein ? { pleinCadre: true } : {}), source: j.source };
     const sans = (s) => { const n = V2.noteVideo(fv, { ...ctx, sans: s }); return n ? n.note : NV.note; };
-    const bloc = (titre, lignes, info) => { const b = el("div"); b.append(el("h5", "", titre)); const u = el("ul"); u.append(...lignes); b.append(u); if (info) b.append(el("div", "info", info)); return b; };
+    const bloc = (titre, lignes, info, avant) => { const b = el("div"); b.append(el("h5", "", titre)); if (avant) b.append(el("div", "info mention", avant)); const u = el("ul"); u.append(...lignes); b.append(u); if (info) b.append(el("div", "info", info)); return b; };
+    const LP = NV.pousse ? V2.lignesPoussee(fv, ctx, NV) : null;   // notation poussée : lignes en plus et mention des paramètres
     // vidéo
     const v = [];
     v.push(li(`Débit vidéo ${f.videoMesure === "estime" ? "déduit du débit global" : f.videoMesure === "etiquette" ? "affiché par MediaInfo" : f.videoMesure === "bdinfo" ? "lu par BDInfo" : f.videoMesure === "moyenne" ? `moyen des ${f.nf} fichiers` : "mesuré (taille de la piste)"}`, `${nb(f.video, 2)} Mb/s`));
@@ -475,12 +489,13 @@
     if (NV.fC !== 1) v.push(li(`Codec ${f.codec} (${fx(NV.fC)})`, pt(NV.note - sans({ codec: true }))));
     if (NV.fB !== 1) v.push(li("10 bits (× 1,05)", pt(NV.note - sans({ bits: true }))));
     if (NV.ef) v.push(li(`Effort de l'encodeur : ${NV.ef} (${fx(NV.fE)})`, pt(NV.note - sans({ effort: true }))));
-    else v.push(li("Réglages d'encodage absents : effort compté × 1", ""));
+    else if (!LP) v.push(li("Réglages d'encodage absents : effort compté × 1", ""));
     if (NV.fM !== 1) v.push(li("Encodeur matériel (× 0,7)", pt(NV.note - sans({ materiel: true }))));
     const bandes = NV.note - sans({ pixels: true });
     if (Math.abs(bandes) >= 0.5) v.push(li(`Bandes noires non comptées (image du film ${nb(ctx.aspect, 2)}:1)`, pt(bandes)));
     if (j.plein) v.push(li("IMAX / Open Matte : image pleine, toute l'image compte", ""));
-    if (NV.fA !== 1) v.push(li("Animation : moitié moins de débit demandé", pt(NV.note - sans({ anim: true }))));
+    if (NV.fA !== 1) v.push(li(LP ? `Animation : × ${nb(NV.fA, 1)} sur le débit demandé (mesuré à CRF égal)` : "Animation : moitié moins de débit demandé", pt(NV.note - sans({ anim: true }))));
+    if (LP) for (const l of LP.lignes) v.push(li(l.lib, l.pts != null && Math.abs(l.pts) >= 0.05 ? pt(l.pts) : ""));
     v.push(li("Note vidéo", nb(NV.note, 0), "total"));
     const reg = f.reglages ? [f.reglages.mode, f.reglages.psyrd ? `psy-rd ${f.reglages.psyrd}` : "", f.reglages.aq ? `aq ${f.reglages.aq}` : "", f.reglages.sao ? `SAO ${f.reglages.sao}` : ""].filter(Boolean).join(" · ") : "";
     const infoV = [f.lib ? f.lib.split(":")[0] : "", reg, saison ? `saison de ${f.nf} fichiers : durée totale ${hm(duree)}` : f.nf > 1 ? `torrent de ${f.nf} fichiers : le plus long sert à la note` : ""].filter(Boolean).join(" · ");
@@ -499,7 +514,7 @@
     n.push(li(`Poids ${j.goh ? nb(j.goh, 2) + " Go/h" : "?"} : ${j.poidsLib}`, fx(j.fPoids)));
     for (const c of j.crit.filter((c) => !c.ok && !c.poids)) n.push(li(`${c.lib} (${c.detail})`, fx(c.f), "non"));
     n.push(li("Note globale", nb(j.globale, 0), "total"));
-    d.append(bloc("Vidéo", v, infoV), bloc("Audio", a, stx ? `Sous-titres : ${stx.texte}` : ""), bloc(`Note (profil ${PROFIL.affiche})`, n, e.approx ? "Taille lue sur la page (arrondie) : la note peut différer d'un point." : ""));
+    d.append(bloc(LP ? "Vidéo (notation poussée)" : "Vidéo", v, infoV, LP ? LP.mention : ""), bloc("Audio", a, stx ? `Sous-titres : ${stx.texte}` : ""), bloc(`Note (profil ${PROFIL.affiche})`, n, e.approx ? "Taille lue sur la page (arrondie) : la note peut différer d'un point." : ""));
     return d;
   }
   function dessinerBulle() {
@@ -510,16 +525,19 @@
     for (const p of P.values()) if (p.bouton) { p.bouton.classList.toggle("ouvert", p.hash === OUVERTE.hash && OUVERTE.epingle); p.bouton.setAttribute("aria-expanded", String(p.hash === OUVERTE.hash)); }
     if (!x) {
       const lus = [...P.values()].filter((p) => FICHES.has(p.hash) || ERREURS.has(p.hash)).length;
-      bulle.append(el("div", "", `Lecture des fiches C411 : ${lus} / ${P.size}`), el("div", "info", FORMAT_CONNU ? "Cette note s'affiche dès que sa fiche est lue. Une fiche lue est gardée en mémoire : la prochaine visite est immédiate."
+      bulle.append(el("div", "", `Lecture des fiches C411 : ${lus} / ${P.size}`), el("div", "info", MODE === "pousse" ? "Notation poussée : les notes s'affichent quand toutes les fiches sont lues (la difficulté du film se mesure sur l'ensemble de ses versions). Une fiche lue est gardée en mémoire : la prochaine visite est immédiate."
+        : FORMAT_CONNU ? "Cette note s'affiche dès que sa fiche est lue. Une fiche lue est gardée en mémoire : la prochaine visite est immédiate."
         : "Les notes s'affichent dès que le format de l'image du film est connu (première version sans bandes noires lue), puis au fil de la lecture. Une fiche lue est gardée en mémoire : la prochaine visite est immédiate."));
     } else if (x.type === "note") {
       const tete = el("div", "tete");
-      tete.append(el("b", x.couleur, String(x.note)), el("span", "sur", "/ 100"), el("span", "profil", `profil « ${PROFIL.affiche} »`));
+      tete.append(el("b", x.couleur, String(x.note)), el("span", "sur", "/ 100"), el("span", "profil", `profil « ${PROFIL.affiche} »${x.j.NV.pousse ? " · poussée" : ""}`));
       bulle.append(tete);
       const sn = el("div"); sn.append("vidéo ", el("b", "", nb(x.j.NV.note, 0)), " · audio ", el("b", "", nb(x.j.NA, 0)));
       bulle.append(sn);
       const manque = x.j.crit.filter((c) => !c.ok).map((c) => c.lib);
       if (manque.length) bulle.append(el("div", "manque", `Manque : ${manque.join(", ")}`));
+      const Pp = x.j.NV.pousse;
+      if (Pp) bulle.append(el("div", "info", Pp.source === "verifies" ? "Paramètres vérifiés" : Pp.source === "non publies" ? "Paramètres non publiés : note sur un encodage moyen" : `${x.j.source} : flux d'origine`));
       const plus = el("button", "plus", `${OUVERTE.detail ? "▾" : "▸"} Pourquoi cette note ?`); plus.type = "button"; plus.setAttribute("aria-expanded", String(!!OUVERTE.detail));
       plus.addEventListener("click", (e) => { e.stopPropagation(); OUVERTE.detail = !OUVERTE.detail; OUVERTE.epingle = true; dessinerBulle(); placer(); });
       bulle.append(plus);
@@ -722,7 +740,8 @@
         const v = {};
         if (ch.profil) v.profil = ch.profil.newValue;
         if (ch.equipement) v.equipement = ch.equipement.newValue;
-        if (ch.profil || ch.equipement) { reglages(v); maj(); }
+        if (ch.notation) v.notation = ch.notation.newValue;
+        if (ch.profil || ch.equipement || ch.notation) { reglages(v); maj(); }
         // mémoire vidée depuis la fenêtre de l'extension : tout est relu
         const vides = Object.keys(ch).filter((k) => k.startsWith("f:") && ch[k].newValue === undefined);
         if (vides.length) { for (const k of vides) { FICHES.delete(k.slice(2)); CHERCHEES.delete(k.slice(2)); } planifier(0); }
@@ -732,7 +751,7 @@
         return false;
       });
     } catch (e) { /* extension rechargée : la page continue avec ce qu'elle a */ }
-    stock.lire(["profil", "equipement"]).then((v) => { reglages({ profil: v.profil, equipement: v.equipement }); planifier(0); });
+    stock.lire(["profil", "equipement", "notation"]).then((v) => { reglages({ profil: v.profil, equipement: v.equipement, notation: v.notation }); planifier(0); });
   }
 
   // Diagnostic : rien de personnel (ni jeton, ni cookie, ni contenu des fiches), seulement des noms de champs et des comptes
@@ -753,7 +772,7 @@
       `champs de tmdbData : ${DIAG.clesTmdb || "(aucun)"}`,
       `aperçu tmdbData : ${DIAG.apercuTmdb || "(pas de réponse)"}`,
       `champs de /mediainfo : ${DIAG.clesMediainfo || "(pas demandé)"}`,
-      `profil : ${PROFIL.affiche} ; œuvre : ${JSON.stringify(P.size ? oeuvre([...P.values()]) : {})}`,
+      `profil : ${PROFIL.affiche} ; notation : ${MODE}${MODE === "pousse" ? ` (difficulté ${(() => { const x = [...RESULTATS.values()].find((r) => r.type === "note"); return x && x.ctx.D ? `${x.ctx.D.D.toFixed(2)} sur ${x.ctx.D.n} version(s) en CRF` : "?"; })()})` : ""} ; œuvre : ${JSON.stringify(P.size ? oeuvre([...P.values()]) : {})}`,
       `erreurs : ${DIAG.erreurs.join(" | ") || "aucune"}`,
     ].join("\n");
   }
