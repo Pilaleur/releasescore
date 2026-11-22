@@ -24,9 +24,12 @@
 
   let profils = {}, equipement = {}, etat = { nom: DEFAUT, r: { ...V2.PROFILS[DEFAUT] } };
   const estBase = (nom) => !!V2.PROFILS[nom];
-  const source = (nom) => V2.PROFILS[nom] || (profils[nom] && { ...NEUTRE, ...profils[nom] }) || null;
+  // 0.4.0 : un profil de base peut être enregistré (ta version, gardée dans « profils » sous son nom) ; « (modifié) » tant qu'il
+  // diffère de l'original ; « Revenir à l'original » efface ta version. « Mes profils » ne liste pas ces versions.
+  const source = (nom) => (profils[nom] && { ...(V2.PROFILS[nom] || {}), ...NEUTRE, ...profils[nom] }) || V2.PROFILS[nom] || null;
   const modifie = () => !pareil(etat.r, source(etat.nom));
-  const affiche = () => etat.nom + (modifie() ? " (modifié)" : "");
+  const differe = (nom, r) => (estBase(nom) ? !pareil(r, V2.PROFILS[nom]) : !pareil(r, source(nom)));
+  const affiche = () => etat.nom + (differe(etat.nom, etat.r) ? " (modifié)" : "");
   const sauver = () => ecrire({ profil: { nom: etat.nom, r: etat.r, affiche: affiche() }, profils, equipement });
 
   // ---------- profil ----------
@@ -38,11 +41,11 @@
   }
   function dessinerProfil() {
     if (!source(etat.nom)) etat.nom = DEFAUT;   // profil supprimé : ses réglages restent, comptés comme HDLight modifié
-    const m = modifie(), sel = $("profil");
+    const m = modifie(), sel = $("profil"), base = estBase(etat.nom), aMaVersion = base && !!profils[etat.nom], loin = base && differe(etat.nom, etat.r);
     sel.replaceChildren();
-    const option = (n) => { const o = el("option", "", n + (n === etat.nom && m ? " (modifié)" : "")); o.value = n; o.selected = n === etat.nom; return o; };
+    const option = (n) => { const o = el("option", "", n + ((n === etat.nom ? differe(n, etat.r) : estBase(n) && profils[n] && differe(n, source(n))) ? " (modifié)" : "")); o.value = n; o.selected = n === etat.nom; return o; };
     for (const n of Object.keys(V2.PROFILS)) sel.append(option(n));
-    const miens = Object.keys(profils).sort((a, b) => a.localeCompare(b));
+    const miens = Object.keys(profils).filter((n) => !estBase(n)).sort((a, b) => a.localeCompare(b));
     if (miens.length) { const g = el("optgroup"); g.label = "Mes profils"; g.append(...miens.map(option)); sel.append(g); }
     $("resume-profil").textContent = resume(etat.r);
     // réglages détaillés
@@ -54,7 +57,7 @@
       if (choix === "nombre") { c = el("input"); c.type = "number"; c.min = min; c.max = max; c.step = pas; c.value = etat.r[k]; }
       else {
         c = el("select");
-        for (const [v, t] of choix) { const o = el("option", "", v === "auto" ? `${t} : ${V2.selon(k).texte}` : t); o.value = v; o.selected = String(etat.r[k]) === v; c.append(o); }
+        for (const [v, t] of choix) { const o = el("option", "", t); o.value = v; o.selected = String(etat.r[k] ?? NEUTRE[k]) === v; c.append(o); }
       }
       c.addEventListener("change", () => {
         const num = c.type === "number", v = num ? parseFloat(String(c.value).replace(",", ".")) : c.value;
@@ -68,9 +71,10 @@
     const a = $("actions-profil");
     a.replaceChildren();
     const bouton = (texte, titre, fn) => { const b = el("button", "", texte); b.type = "button"; if (titre) b.title = titre; b.addEventListener("click", fn); a.append(b); };
-    if (m) bouton("Réinitialiser", `remettre les réglages de « ${etat.nom} »`, () => { etat = { nom: etat.nom, r: { ...source(etat.nom) } }; changer(); });
-    if (m && !estBase(etat.nom)) bouton("Enregistrer", `remplacer les réglages de ton profil « ${etat.nom} »`, () => { profils[etat.nom] = { ...etat.r }; changer(); });
-    if (!m && !estBase(etat.nom)) {
+    if (m && (!base || aMaVersion)) bouton("Réinitialiser", `remettre les réglages enregistrés de « ${etat.nom} »`, () => { etat = { nom: etat.nom, r: { ...source(etat.nom) } }; changer(); });
+    if (m) bouton("Enregistrer", base ? `garder ces réglages pour « ${etat.nom} » ; « Revenir à l'original » les efface` : `remplacer les réglages de ton profil « ${etat.nom} »`, () => { profils[etat.nom] = { ...etat.r }; changer(); });
+    if (aMaVersion || loin) bouton("Revenir à l'original", `remettre les réglages d'origine de « ${etat.nom} »`, () => { delete profils[etat.nom]; etat = { nom: etat.nom, r: { ...V2.PROFILS[etat.nom] } }; changer(); });
+    if (!m && !base) {
       let arme = false;
       bouton("Supprimer ce profil", "", (e) => {
         if (!arme) { arme = true; e.currentTarget.textContent = "Confirmer la suppression"; return; }
@@ -111,23 +115,44 @@
 
   // ---------- équipement ----------
   const OUI_NON = [["oui", "Oui"], ["non", "Non"]];
+  // 0.4.0 (22/11/2026) : mêmes questions que l'outil, en trois groupes ; « Tu regardes avec » remplit ce qui s'en déduit
   const QUESTIONS = [
+    ["Ton écran"],
     ["def", "Définition de l'écran", [["1080", "1080p"], ["4k", "4K"]], ""],
     ["hdr", "L'écran affiche le HDR", OUI_NON, "HDR10 ou HDR10+. Écran HDR peu lumineux (moins de 500 nits environ) : choisis plutôt « SDR préféré » dans le profil."],
     ["dv", "L'écran lit le Dolby Vision", OUI_NON, "Un fichier en Dolby Vision sans HDR10 s'affiche avec des couleurs fausses (vert / violet) sur un écran qui ne le lit pas."],
-    ["av1", "Ton appareil lit l'AV1", OUI_NON, "L'appareil qui lit le fichier : la télé elle-même, une box, une clé HDMI… « Lit » = directement, sans conversion."],
-    ["dts", "Ton appareil lit le DTS", OUI_NON, ""],
-    ["avi", "Ton appareil lit les .avi", OUI_NON, ""],
+    ["dvp7", "dont le profil 7 (double couche des remux UHD)", OUI_NON, "Profil 7 non lu : l'image s'affiche en HDR10 seulement, ou avec des couleurs fausses selon l'appareil."],
+    ["d3", "L'écran lit la 3D", OUI_NON, "Côte à côte, dessus-dessous, Blu-ray 3D. Les télés récentes ne la lisent plus. « Je ne sais pas » compte comme « Non »."],
+    ["Ton appareil de lecture"],
+    ["lecteurs"],
+    ["av1", "Il lit l'AV1", OUI_NON, "L'appareil qui lit le fichier : la télé elle-même, une box, une clé HDMI… « Lit » = directement, sans conversion par le serveur (Plex…)."],
+    ["h10", "Il lit le H.264 en 10 bits (animés)", OUI_NON, ""],
+    ["avi", "Il lit les .avi", OUI_NON, ""],
+    ["dts", "Il lit le DTS", OUI_NON, ""],
+    ["opus", "Il lit l'Opus", OUI_NON, ""],
+    ["hd", "Le TrueHD et le DTS-HD MA passent tels quels (HDMI eARC)", OUI_NON, "Barre de son en HDMI ARC (sans « e ») : en général « Non ». Plex convertit alors le son, ou n'envoie que sa version simplifiée."],
+    ["pgs", "Il affiche les sous-titres en image (PGS, VobSub)", OUI_NON, "Souvent « Non » avec Plex : pour les afficher (même les forcés d'un film en VFF), Plex convertit toute la vidéo. Les sous-titres en texte (SRT, ASS) n'ont pas ce problème."],
+    ["Tes goûts"],
     ["son", "Son", [["tv", "Télé"], ["barre", "Barre de son"], ["51", "5.1"], ["atmos", "Ampli Atmos"]], ""],
     ["priorite", "Priorité", [["place", "Gagner de la place"], ["equilibre", "Équilibre"], ["qualite", "Qualité d'abord"]], ""],
   ];
+  // réponses déduites des lecteurs cochés (EQ.deduire) ; une réponse choisie à la main n'est jamais remplacée
+  function appliquerDeduction() {
+    const d = EQ.deduire(E.lecteurs);
+    E.deduits = Array.isArray(E.deduits) ? E.deduits : [];
+    for (const k of EQ.DEDUCTIBLES) {
+      const deduit = E.deduits.includes(k);
+      if (d[k] && (E[k] == null || deduit)) { E[k] = d[k]; if (!deduit) E.deduits.push(k); }
+      else if (!d[k] && deduit) { delete E[k]; E.deduits = E.deduits.filter((x) => x !== k); }
+    }
+  }
   let E = {};   // réponses en cours de saisie
   function resumeEquipement() {
     const e = equipement || {}, rempli = Object.keys(e).length > 0;
     $("resume-equipement").textContent = !rempli ? "Questionnaire pas encore rempli" : e.taille ? `Écran ${nb(e.taille)} pouces${e.distance ? `, vu à ${nb(e.distance)} m` : ""}` : "Taille de l'écran non renseignée";
-    const NOMS = { hdr: "le HDR", dv: "le Dolby Vision", av1: "l'AV1", dts: "le DTS", avi: "les .avi" };
+    const NOMS = { hdr: "le HDR", dv: "le Dolby Vision", dvp7: "le DV profil 7", d3: "la 3D", av1: "l'AV1", h10: "le H.264 10 bits", avi: "les .avi", dts: "le DTS", opus: "l'Opus", hd: "le TrueHD / DTS-HD MA tels quels", pgs: "les sous-titres en image" };
     const oui = Object.keys(NOMS).filter((k) => e[k] === "oui").map((k) => NOMS[k]), non = Object.keys(NOMS).filter((k) => e[k] === "non").map((k) => NOMS[k]);
-    $("resume-lit").textContent = !rempli ? "Réglages neutres : rien n'est refusé, le Dolby Vision seul et les .avi sont déconseillés (× 0,9)."
+    $("resume-lit").textContent = !rempli ? "Rien de renseigné : chaque version concernée (AV1, DTS, sous-titres en image…) est notée × 0,9 avec un badge « ? » ; la 3D compte comme non lue (× 0,5)."
       : [oui.length ? `Lit ${oui.join(", ")}` : "", non.length ? `ne lit pas ${non.join(", ")}` : ""].filter(Boolean).join(" · ") || "Aucune réponse sur ce que lisent l'écran et l'appareil.";
     $("ouvrir-equipement").textContent = rempli ? "Refaire le questionnaire" : "Remplir le questionnaire";
   }
@@ -141,15 +166,28 @@
     const champ = (k, label) => { const i = el("input", "court"); i.type = "text"; i.inputMode = "decimal"; i.value = E[k] ?? ""; i.setAttribute("aria-label", label); i.addEventListener("input", () => { E[k] = i.value; dessinerResultat(); }); return i; };
     mesure.append(champ("taille", "Taille en pouces"), "pouces, regardé à", champ("distance", "Distance en mètres"), "m");
     q0.append(mesure, el("span", "aide", "Vide = je ne sais pas. La distance sert à savoir si la 4K se voit depuis ta place."));
-    zone.append(q0);
     for (const [k, lib, choix, aide] of QUESTIONS) {
+      if (!lib && k !== "lecteurs") { zone.append(el("h3", "groupe", k)); if (k === "Ton écran") zone.append(q0); continue; }
       const q = el("div", "q");
-      q.append(el("span", "lib", lib));
+      if (k === "lecteurs") {
+        q.append(el("span", "lib", "Tu regardes avec"));
+        const c = el("div", "coches");
+        for (const [v, t] of EQ.LECTEURS) {
+          const l = el("label"), i = el("input"); i.type = "checkbox"; i.checked = (E.lecteurs || []).includes(v);
+          i.addEventListener("change", () => { E.lecteurs = EQ.LECTEURS.map(([x]) => x).filter((x) => (x === v ? i.checked : (E.lecteurs || []).includes(x))); appliquerDeduction(); dessinerQuestions(); dessinerResultat(); });
+          l.append(i, " " + t); c.append(l);
+        }
+        q.append(c, el("span", "aide", "Plusieurs choix possibles. Kodi, VLC et Infuse lisent presque tout eux-mêmes : les réponses qui s'en déduisent sont remplies, et restent modifiables."));
+        zone.append(q); continue;
+      }
+      const titre = el("span", "lib", lib);
+      if ((E.deduits || []).includes(k)) titre.append(" ", el("span", "deduit", "déduit de ton lecteur"));
+      q.append(titre);
       const seg = el("span", "seg"); seg.setAttribute("role", "group"); seg.setAttribute("aria-label", lib);
       for (const [v, t] of [...choix, [null, "Je ne sais pas"]]) {
         const b = el("button", v === null ? "nsp" : "", t); b.type = "button";
         b.setAttribute("aria-pressed", String((E[k] ?? null) === v));
-        b.addEventListener("click", () => { if (v === null) delete E[k]; else E[k] = v; dessinerQuestions(); dessinerResultat(); });
+        b.addEventListener("click", () => { if (v === null) delete E[k]; else E[k] = v; E.deduits = (E.deduits || []).filter((x) => x !== k); dessinerQuestions(); dessinerResultat(); });
         seg.append(b);
       }
       q.append(seg);
@@ -167,7 +205,7 @@
       : c.criteres ? "En enregistrant : ton profil actif ne change pas ; les critères d'équipement s'appliquent à tous les profils." : "Aucune réponse pour l'instant : rien ne change.";
   }
   function montrer(vue) { $("vue-principale").hidden = vue !== "principale"; $("vue-equipement").hidden = vue !== "equipement"; scrollTo(0, 0); }
-  $("ouvrir-equipement").addEventListener("click", () => { E = { ...equipement }; for (const k of ["taille", "distance"]) if (E[k] != null) E[k] = String(E[k]).replace(".", ","); dessinerQuestions(); dessinerResultat(); montrer("equipement"); });
+  $("ouvrir-equipement").addEventListener("click", () => { E = { ...equipement, lecteurs: [...(equipement.lecteurs || [])], deduits: [...(equipement.deduits || [])] }; for (const k of ["taille", "distance"]) if (E[k] != null) E[k] = String(E[k]).replace(".", ","); dessinerQuestions(); dessinerResultat(); montrer("equipement"); });
   $("retour").addEventListener("click", () => montrer("principale"));
   $("retour-bas").addEventListener("click", () => montrer("principale"));
   $("enregistrer-equipement").addEventListener("click", () => {

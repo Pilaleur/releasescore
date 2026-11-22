@@ -63,3 +63,11 @@ textarea{width:100%;margin-top:6px;padding:8px;font-family:ui-monospace,Consolas
 /* 0.1.4 : texte d'effet et boutons du questionnaire toujours visibles en bas ; confirmation après l'enregistrement */
 .pied{position:sticky;bottom:0;margin:0 -18px -18px;padding:12px 18px 18px;background:#07120e;border-top:1px solid #1f3b31;display:flex;flex-direction:column;gap:10px;box-shadow:0 -8px 16px rgba(0,0,0,.35)}
 .confirmation{font-size:13px;color:#6ee7b7;background:#064e3b;border:1px solid #10b981;border-radius:8px;padding:8px 10px}
+/* 0.4.0 : questionnaire en trois groupes, lecteurs cochés, réponses déduites du lecteur */
+h3.groupe{margin:14px 0 0;padding-top:10px;border-top:1px solid #1f3b31}
+#questions h3.groupe:first-child{margin-top:0;padding-top:0;border-top:0}
+.coches{display:flex;flex-wrap:wrap;gap:4px}
+.coches label{display:inline-flex;align-items:center;gap:5px;font-size:12px;border:1px solid #2c4a3f;border-radius:16px;padding:3px 9px;cursor:pointer}
+.coches label:has(input:checked){border-color:#10b981;background:#0c3a2a;color:#6ee7b7}
+.coches input{width:auto;min-height:0;margin:0}
+.deduit{font-size:10px;font-weight:700;color:#67e8f9;border:1px solid #67e8f9;border-radius:4px;padding:0 4px;white-space:nowrap}

@@ -18,11 +18,16 @@
   // Ajouts du 08/11/2026 (soir) : profil « 1080p Haute qualité » ; version IMAX / Open Matte (v.pleinCadre, d'après son nom) :
   // image pleine à format variable, ses bandes noires éventuelles ne sont pas retirées (elle n'est pas comptée au format du film).
   // Pas de facteur de source ici (choix du 08/11 : la note v2 ne garde que ce qui se mesure).
-  // Lot 4b (10/11/2026) : profils de base neutres. Les critères « Dolby Vision sans HDR10 » et « Fichier AVI » ont le choix
-  // « Selon ton équipement » (auto, par défaut) : refusé si l'équipement ne le lit pas, déconseillé (× 0,9) s'il n'est pas
-  // renseigné, accepté s'il le lit. Deux critères d'équipement s'ajoutent, sans réglage de profil : vidéo AV1 refusée (× 0,5)
-  // si l'appareil ne la décode pas ; pistes DTS ignorées dans la note audio si l'appareil ne les lit pas.
-  // L'équipement vient du questionnaire « Ton équipement » (configuration/reglages.json), donné par V2.equipement({...}).
+  // Lot 4b (10/11/2026) : profils de base neutres ; critères d'équipement venus du questionnaire « Ton équipement »
+  // (configuration/reglages.json), donnés par V2.equipement({...}).
+  // Lot « Ton équipement » (22/11/2026) : TOUS les critères d'équipement sortent du profil (« Dolby Vision sans HDR10 » et
+  // « Fichier AVI » n'y sont plus ; anciens profils enregistrés : ces deux clés sont ignorées). Dix questions, chacune
+  // Oui / Non / Je ne sais pas : Dolby Vision seul (dv), profil 7 (dvp7), 3D (d3), AV1 (av1), H.264 10 bits (h10), .avi (avi),
+  // DTS (dts), Opus (opus), TrueHD / DTS-HD MA tels quels (hd), sous-titres en image PGS / VobSub (pgs). Voir compatibilite().
+  //   « Non » : version × 0,5, badge rouge ; « Je ne sais pas » : × 0,9, badge orange « ? » ; sauf la 3D (« Je ne sais pas » = « Non »).
+  //   Le facteur compte UNE fois par version (× 0,5 si au moins un « Non », sinon × 0,9 si au moins un « Je ne sais pas »).
+  //   Audio : une piste que l'appareil ne lit pas est ignorée dans la note audio (comme le DTS avant) ; la version n'est
+  //   touchée que si AUCUNE piste de la langue voulue n'est lisible. DTS-HD MA non transmis tel quel : son cœur DTS compte.
   // Lot VOSTFR (11/11/2026) : réglage « Langue » : « VO requise » (piste dans la langue originale de l'œuvre, o.vo ; œuvre française :
   // ses pistes françaises) ; nouveau réglage « Sous-titres français » (indifférents, préférés × 0,9, requis × 0,7), d'après v.st :
   // seuls les sous-titres français complets comptent (pas les forcés, qui ne traduisent que les passages en langue étrangère).
@@ -36,7 +41,8 @@
   // Films plus étroits que 16:9 (12/11/2026, Alice au pays des merveilles 1951, 4:3) : classe aussi d'après la hauteur
   // (1440 × 1080 = 1080p), format du film déduit des versions étroites, bandes noires sur les côtés retirées des pixels utiles.
   // Faits d'une version (lecteur-mediainfo.js, ou estimation d'après le titre) :
-  //   { w, h, par (anamorphique seulement), bits, hdr, codec, video (Mb/s), lib, enc, pistes: [{ format, brut, canaux, debit (kb/s), langue, role }], st: [{ langue, force, sdh }] }
+  //   { w, h, par (anamorphique seulement), bits, hdr, dvp (profil Dolby Vision), d3 (3D), codec, video (Mb/s), lib, enc,
+  //     pistes: [{ format, brut, canaux, debit (kb/s), langue, role }], st: [{ langue, force, sdh, img ("pgs" | "vobsub" : sous-titres en image) }] }
   // =====================================================================================================================
   const V2 = (function () {
     const P1080 = 1920 * 1080;
@@ -244,7 +250,7 @@
       let n, type;
       if (/truehd|mlp|dts-hd master|xll|flac|pcm/.test(f)) { n = 92 + (/atmos|mlp fba|dts:x|xll x/.test(f) ? 4 : 0); type = "sans perte"; }
       else {
-        const T = /plus|e-ac-3|eac3/.test(f) ? [84, 45, "E-AC3"] : /dolby digital|ac-3|ac3/.test(f) ? [76, 55, "AC3"] : /dts/.test(f) ? [84, 110, "DTS"]
+        const T = /plus|e-ac-3|eac3/.test(f) ? [84, 45, "E-AC3"] : /dolby digital|ac-3|ac3/.test(f) ? [76, 55, "AC3"] : /dts/.test(f) ? [84, 70, "DTS"]
           : /he-aac|sbr/.test(f) ? [72, 22, "HE-AAC"] : /aac/.test(f) ? [82, 40, "AAC"] : /opus/.test(f) ? [84, 30, "Opus"] : [70, 60, "?"];
         const d = p.debit > 0 ? p.debit : DEBIT_TYPIQUE[T[2]];
         n = T[0] * (1 - Math.exp(-(d / ch) / T[1])) + (/joc|atmos/.test(f) || (T[2] === "E-AC3" && d >= 768) ? 3 : 0); type = T[2];
@@ -253,28 +259,86 @@
     }
     const LANG = { vff: "VFF", vfq: "VFQ", vfb: "VFB", vo: "VO", autre: "autre" };
 
-    // ---------- Équipement de l'installation (questionnaire « Ton équipement ») ----------
-    // { dv, avi, av1, dts } : "oui" (lu), "non" (pas lu) ou null (non renseigné). Sans appel : rien de renseigné.
-    let EQ = { dv: null, avi: null, av1: null, dts: null };
+    // ---------- Équipement de l'installation (questionnaire « Ton équipement », 22/11/2026) ----------
+    // Chaque clé : "oui" (lu sans conversion), "non" (pas lu) ou null (je ne sais pas). Sans appel : rien de renseigné.
+    // court : badge (« ? » ajouté pour « Je ne sais pas ») ; non / doute : texte de « Manque » et de « Pourquoi cette note ? ».
+    const EQUIPEMENT = {
+      dv: { court: "DV seul", non: "Dolby Vision seul non lu par ton écran", doute: "Dolby Vision seul à vérifier", titre: "Dolby Vision sans HDR10 : couleurs fausses (vert / violet) sur un écran qui ne lit pas le Dolby Vision" },
+      dvp7: { court: "DV P7", non: "Dolby Vision profil 7 non lu", doute: "Dolby Vision profil 7 à vérifier", titre: "Dolby Vision profil 7 (double couche des remux UHD) : non lu, l'image s'affiche en HDR10 seulement, ou avec des couleurs fausses selon l'appareil" },
+      d3: { court: "3D", non: "3D non lue par ton écran", doute: "3D (écran non renseigné : comptée « Non »)", titre: "Version 3D (côte à côte, dessus-dessous, Blu-ray 3D) : les télés récentes ne la lisent plus" },
+      av1: { court: "AV1", non: "AV1 non décodé par ton appareil", doute: "AV1 à vérifier", titre: "Vidéo AV1" },
+      h10: { court: "H.264 10 bits", non: "H.264 10 bits non décodé par ton appareil", doute: "H.264 10 bits à vérifier", titre: "Vidéo H.264 en 10 bits (Hi10P, surtout les animés) : peu d'appareils la décodent eux-mêmes" },
+      avi: { court: "AVI", non: "fichier .avi non lu par ton appareil", doute: "fichier .avi à vérifier", titre: "Fichier .avi : compatibilité limitée selon les appareils" },
+      dts: { court: "DTS", non: "DTS non lu par ton appareil", doute: "DTS à vérifier", titre: "Audio DTS" },
+      opus: { court: "Opus", non: "Opus non lu par ton appareil", doute: "Opus à vérifier", titre: "Audio Opus" },
+      hd: { court: "TrueHD", non: "TrueHD non transmis tel quel", doute: "TrueHD tel quel à vérifier", titre: "Audio sans perte (TrueHD, DTS-HD MA) transmis tel quel à la barre de son ou à l'ampli (HDMI eARC)" },
+      pgs: { court: "PGS", non: "sous-titres en image (PGS) non lus sans conversion", doute: "sous-titres en image (PGS) à vérifier", titre: "Sous-titres en image (PGS, VobSub) : avec Plex, les afficher (même les forcés) fait convertir toute la vidéo ; les sous-titres en texte (SRT, ASS) n'ont pas ce problème" },
+    };
+    const CLES_EQ = Object.keys(EQUIPEMENT);
+    let EQ = Object.fromEntries(CLES_EQ.map((k) => [k, null]));
     const ouiNon = (x) => (x === "oui" || x === "non" ? x : null);
     function equipement(e) {
-      if (e !== undefined) EQ = { dv: ouiNon(e && e.dv), avi: ouiNon(e && e.avi), av1: ouiNon(e && e.av1), dts: ouiNon(e && e.dts) };
+      if (e !== undefined) EQ = Object.fromEntries(CLES_EQ.map((k) => [k, ouiNon(e && e[k])]));
       return EQ;
     }
-    // Réglage « Selon ton équipement » des critères « dv » et « avi » : ce qu'il donne chez toi, et pourquoi.
-    // -> { v: "refuse" | "deconseille" | "ok", texte (pour la liste du profil), detail (pour « Pourquoi cette note ? ») }
-    const SELON = {
-      dv: { non: ["refuse", "refusé (ton écran ne lit pas le DV)", "ton écran ne lit pas le DV"], oui: ["ok", "accepté (ton écran lit le DV)", ""],
-        inconnu: ["deconseille", "déconseillé × 0,9 (écran non renseigné)", "écran non renseigné"] },
-      avi: { non: ["refuse", "refusé (ton appareil ne lit pas les .avi)", "ton appareil ne lit pas les .avi"], oui: ["ok", "accepté (ton appareil lit les .avi)", ""],
-        inconnu: ["deconseille", "déconseillé × 0,9 (appareil non renseigné)", "appareil non renseigné"] },
-    };
-    function selon(k) { const x = SELON[k][EQ[k] || "inconnu"]; return { v: x[0], texte: x[1], detail: x[2] }; }
-    // Valeur appliquée d'un critère « dv » ou « avi » du profil r (auto = selon l'équipement ; valeur inconnue = auto)
-    function applique(k, r) {
-      const v = r[k];
-      if (v === "refuse" || v === "deconseille" || v === "ok") return { v, detail: "" };
-      return selon(k);
+    // 3D d'après le nom de la release (22/11/2026) : SBS, H-OU, MVC, BD3D… ; « 3D » seul ne compte pas quand il est dans le titre
+    // de l'œuvre (Piranha 3D). titres : titres de l'œuvre ; inconnus (extension, ancienne fiche) : « 3D » seul ne compte pas.
+    const MOTS_3D_FORTS = /(^|[^A-Z0-9])(H[ ._-]?SBS|HALF[ ._-]?SBS|SBS|H[ ._-]?OU|HALF[ ._-]?OU|H[ ._-]?TAB|MVC|BD3D|3D[ ._-]?BLU[ ._-]?RAY)([^A-Z0-9]|$)/i;
+    const MOT_3D = /(^|[^A-Z0-9])3D([^A-Z0-9]|$)/i;
+    function est3D(nom, titres) {
+      const t = String(nom || "");
+      if (MOTS_3D_FORTS.test(t)) return true;
+      return MOT_3D.test(t) && Array.isArray(titres) && titres.length > 0 && !titres.some((x) => MOT_3D.test(x || ""));
+    }
+    // Lisibilité d'une piste audio : 2 = lue, 1 = je ne sais pas, 0 = pas lue ; k = la question qui décide ; core : DTS-HD MA
+    // non transmis tel quel mais son cœur DTS lu (la piste compte comme un DTS de 1 509 kb/s)
+    const niveau = (k) => (EQ[k] === "oui" ? 2 : EQ[k] === "non" ? 0 : 1);
+    function lisibilite(p) {
+      const f = (String(p.format || "") + " " + String(p.brut || "")).toLowerCase();
+      if (/truehd|mlp/.test(f)) return { n: niveau("hd"), k: "hd", nom: "TrueHD" };
+      if (/xll|dts-hd master|dts:x/.test(f)) {
+        const hd = niveau("hd"), dts = niveau("dts");
+        if (hd === 2) return { n: 2, k: "hd", nom: "DTS-HD MA" };
+        if (hd === 0) return { n: dts, k: "dts", nom: "DTS-HD MA", core: dts > 0 };
+        return dts === 2 ? { n: 2 } : { n: 1, k: "hd", nom: "DTS-HD MA" };   // tel quel : je ne sais pas ; le cœur DTS lu suffit
+      }
+      if (/dts/.test(f)) return { n: niveau("dts"), k: "dts", nom: "DTS" };
+      if (/opus/.test(f)) return { n: niveau("opus"), k: "opus", nom: "Opus" };
+      return { n: 2 };
+    }
+    // Sous-titres en image gênants (pgs) : français forcés seulement en image (affichés d'office avec la VF), ou français complets
+    // seulement en image quand ils sont lus (profil « Sous-titres français », ou pas de piste française dans la langue retenue).
+    // Sous-titres inconnus, ou lus avant le 22/11/2026 (sans « img ») : rien n'est compté.
+    function stImage(v, r, sansVf) {
+      if (!v || !Array.isArray(v.st) || !v.st.length || !v.st.some((x) => x.img !== undefined)) return null;
+      const fr = v.st.filter((x) => x.langue === "fr");
+      const seulementImage = (l) => l.length > 0 && l.every((x) => x.img);
+      const forces = fr.filter((x) => x.force), complets = fr.filter((x) => !x.force);
+      const gene = seulementImage(forces) || ((r.st === "pref" || r.st === "requis" || sansVf) && seulementImage(complets));
+      if (!gene) return null;
+      return fr.some((x) => x.img === "vobsub") && !fr.some((x) => x.img === "pgs") ? "VobSub" : "PGS";
+    }
+    // Ce que ton équipement ne lit pas dans une version : { items: [{ k, etat ("non" | "doute"), court, texte, titre }], f }
+    // audio : { etat, cles: [clé, nom] } calculé par juger (lisibilité des pistes de la langue voulue)
+    function compatibilite(v, r, audio, sansVf) {
+      const items = [];
+      const ajoute = (k, rep, court, texte) => {
+        if (rep === "oui") return;
+        const etat = rep === "non" || k === "d3" ? "non" : "doute", D = EQUIPEMENT[k];
+        items.push({ k, etat, court: (court || D.court) + (etat === "doute" ? " ?" : ""), texte: texte ? texte[etat] : D[etat], titre: D.titre });
+      };
+      if (v.hdr === "DV seul") ajoute("dv", EQ.dv);
+      else if (v.dvp === 7 && /^DV \+/.test(v.hdr || "") && EQ.dv !== "non") ajoute("dvp7", EQ.dvp7);   // écran sans DV : la couche HDR10 suffit
+      if (v.d3) ajoute("d3", EQ.d3);
+      if (v.codec === "AV1") ajoute("av1", EQ.av1);
+      if (v.codec === "H.264" && v.bits >= 10) ajoute("h10", EQ.h10);
+      if (v.avi) ajoute("avi", EQ.avi);
+      if (audio && audio.etat !== 2) for (const [k, nom] of audio.cles) ajoute(k, audio.etat === 0 ? "non" : null, nom,
+        k === "hd" ? { non: `${nom} non transmis tel quel`, doute: `${nom} tel quel à vérifier` } : { non: `${nom} non lu par ton appareil`, doute: `${nom} à vérifier` });
+      const img = stImage(v, r, sansVf);
+      if (img) ajoute("pgs", EQ.pgs, img, { non: `sous-titres en image (${img}) non lus sans conversion`, doute: `sous-titres en image (${img}) à vérifier` });
+      const f = items.some((x) => x.etat === "non") ? 0.5 : items.length ? 0.9 : 1;
+      return { items, f };
     }
     // Sous-titres d'une version : null si inconnus ; sinon { fr (sous-titres français complets), texte (« français (SDH), anglais »…) }
     const NOMS_ST = { fr: "français", en: "anglais", es: "espagnol", it: "italien", de: "allemand", ja: "japonais", ko: "coréen", zh: "chinois", pt: "portugais", nl: "néerlandais", ru: "russe", ar: "arabe" };
@@ -288,22 +352,19 @@
       const liste = [lfr, ...autres.slice(0, 3)].filter(Boolean);
       return { fr: complets.length > 0, texte: liste.length ? liste.join(", ") + (autres.length > 3 ? ` et ${autres.length - 3} autres` : "") : "aucun" };
     }
-    const estDts = (p) => /dts|xll/i.test(String(p.format || "") + " " + String(p.brut || ""));
 
     const PROFILS = {
-      "HDLight 1080p": { res: "1080", basse: "penal", hdr: "sdr-pref", dv: "auto", avi: "auto", codec: "pref", langue: "vff", st: "indiff", audio: "correct", poidsAudio: 15, cible: 2, plafond: 2.5 },
-      "1080p Haute qualité": { res: "1080", basse: "penal", hdr: "sdr-pref", dv: "auto", avi: "auto", codec: "pref", langue: "vff", st: "indiff", audio: "bon", poidsAudio: 20, cible: 4, plafond: 6 },
-      "4KLight": { res: "2160", basse: "penal", hdr: "indiff", dv: "auto", avi: "auto", codec: "pref", langue: "vff", st: "indiff", audio: "bon", poidsAudio: 20, cible: 5, plafond: 6 },
-      "4K HDR cinéma": { res: "2160", basse: "penal", hdr: "requis", dv: "auto", avi: "auto", codec: "indiff", langue: "vff", st: "indiff", audio: "sansperte", poidsAudio: 35, cible: 20, plafond: 40 },
-      "Petit fichier": { res: "1080", basse: "ok", hdr: "sdr-pref", dv: "auto", avi: "auto", codec: "pref", langue: "vf", st: "indiff", audio: "correct", poidsAudio: 10, cible: 1, plafond: 1.5 },
-      "Qualité maximale": { res: "2160", basse: "penal", hdr: "indiff", dv: "auto", avi: "auto", codec: "indiff", langue: "vff", st: "indiff", audio: "sansperte", poidsAudio: 30, cible: 0, plafond: 0 },
+      "HDLight 1080p": { res: "1080", basse: "penal", hdr: "sdr-pref", codec: "pref", langue: "vff", st: "indiff", audio: "correct", poidsAudio: 15, cible: 2, plafond: 2.5 },
+      "1080p Haute qualité": { res: "1080", basse: "penal", hdr: "sdr-pref", codec: "pref", langue: "vff", st: "indiff", audio: "bon", poidsAudio: 20, cible: 4, plafond: 6 },
+      "4KLight": { res: "2160", basse: "penal", hdr: "indiff", codec: "pref", langue: "vff", st: "indiff", audio: "bon", poidsAudio: 20, cible: 5, plafond: 6 },
+      "4K HDR cinéma": { res: "2160", basse: "penal", hdr: "requis", codec: "indiff", langue: "vff", st: "indiff", audio: "sansperte", poidsAudio: 35, cible: 20, plafond: 40 },
+      "Petit fichier": { res: "1080", basse: "ok", hdr: "sdr-pref", codec: "pref", langue: "vf", st: "indiff", audio: "correct", poidsAudio: 10, cible: 1, plafond: 1.5 },
+      "Qualité maximale": { res: "2160", basse: "penal", hdr: "indiff", codec: "indiff", langue: "vff", st: "indiff", audio: "sansperte", poidsAudio: 30, cible: 0, plafond: 0 },
     };
     const CHAMPS = [
       ["res", "Résolution idéale", [["1080", "1080p"], ["2160", "4K (2160p)"]]],
       ["basse", "Résolution plus basse que l'idéale", [["penal", "Pénalisée (×0,6)"], ["ok", "Acceptée (comparée à l'idéal)"]]],
       ["hdr", "HDR", [["sdr-req", "SDR requis (HDR ×0,6)"], ["sdr-pref", "SDR préféré (HDR ×0,9)"], ["indiff", "Indifférent"], ["pref", "HDR préféré (SDR ×0,9)"], ["requis", "HDR requis (SDR ×0,6)"]]],
-      ["dv", "Dolby Vision sans HDR10", [["auto", "Selon ton équipement"], ["refuse", "Refusé (×0,5)"], ["deconseille", "Déconseillé (×0,9)"], ["ok", "Accepté"]]],
-      ["avi", "Fichier AVI", [["auto", "Selon ton équipement"], ["refuse", "Refusé (note 0)"], ["deconseille", "Déconseillé (×0,9)"], ["ok", "Accepté"]]],
       ["codec", "Codec H.265 / AV1", [["requis", "Requis (H.264 ×0,6)"], ["pref", "Préféré (H.264 ×0,9)"], ["indiff", "Indifférent"]]],
       ["langue", "Langue", [["vff", "VFF requise (sinon ×0,7)"], ["vf", "VF : VFF ou VFQ (sinon ×0,7)"], ["vo", "VO requise (sinon ×0,7)"], ["indiff", "Indifférente"]]],
       ["st", "Sous-titres français", [["indiff", "Indifférents"], ["pref", "Préférés (sinon ×0,9)"], ["requis", "Requis (sinon ×0,7)"]]],
@@ -312,6 +373,10 @@
       ["cible", "Poids cible (Go par heure, 0 = sans limite)", "nombre", 0, 60, 0.5],
       ["plafond", "Poids plafond (Go par heure, 0 = sans limite)", "nombre", 0, 80, 0.5],
     ];
+    // Réglage absent d'un profil enregistré avant son ajout (lot VOSTFR : « st ») : sa valeur neutre. Les réglages d'affichage de
+    // Rechercher (3D, Opus, note minimale, un temps dans le profil le 22/11/2026) sont passés dans la ligne « Masquer » de la page
+    // et dans Ton équipement : valeurs déjà enregistrées ignorées, comme « dv » et « avi ».
+    const NEUTRES = { st: "indiff" };
     const AUDIO_IDEAL = { correct: { piste: { format: "Dolby Digital", brut: "AC-3", canaux: 6, debit: 448 }, mbps: 0.9 },
       bon: { piste: { format: "Dolby Digital Plus with Dolby Atmos", brut: "E-AC-3 JOC", canaux: 6, debit: 768 }, mbps: 1.5 },
       sansperte: { piste: { format: "Dolby TrueHD with Dolby Atmos", brut: "MLP FBA", canaux: 8, debit: 3690 }, mbps: 4.5 } };
@@ -334,18 +399,32 @@
     function juger(v, r, I, o = {}) {
       const NV = noteVideo(v, o);
       if (!NV) return null;
-      // pistes DTS (DTS, DTS-HD, DTS:X) : ignorées dans la note audio quand l'appareil ne lit pas le DTS (équipement)
-      const sansDts = EQ.dts === "non";
-      const pistes = (v.pistes || []).map((p) => ({ ...p, ...notePiste(p), ...(sansDts && !p.role && estDts(p) ? { ignoree: true } : {}) }));
+      // Pistes que ton appareil ne lit pas (Ton équipement : DTS, Opus, TrueHD / DTS-HD MA tels quels) : ignorées dans la note audio ;
+      // DTS-HD MA non transmis tel quel mais DTS lu : compté comme son cœur DTS (1 509 kb/s). Lisibilité « je ne sais pas » : comptée.
+      const pistes = (v.pistes || []).map((p) => {
+        const x = { ...p, ...notePiste(p) };
+        if (p.role) return x;
+        const L = lisibilite(p);
+        x.lisible = L.n;
+        if (L.n === 0) { x.ignoree = true; x.pourquoi = L.k === "hd" ? `${L.nom} non transmis tel quel` : `ton appareil ne lit pas le ${L.nom}`; }
+        else if (L.core) { x.note = notePiste({ format: "DTS", brut: "DTS", canaux: p.canaux, debit: 1509 }).note; x.core = true; x.pourquoi = "cœur DTS : DTS-HD MA non transmis tel quel"; }
+        if (L.n < 2) x.cle = [L.k, L.nom];
+        return x;
+      });
       // langue « ? » (estimation d'après un titre sans langue, ou fichier sans langue indiquée) : pas pénalisée, comme avant
       // VO (lot VOSTFR) : piste dans la langue originale (o.vo, langue TMDB) ; œuvre française : ses pistes françaises
       const estVo = (p) => p.langue === "vo" || (o.vo === "fr" && ["vff", "vfq", "vfb"].includes(p.langue));
       const voulues = (p) => !p.role && (p.langue === "?" || (r.langue === "vff" ? p.langue === "vff" : r.langue === "vf" ? ["vff", "vfq"].includes(p.langue) : r.langue === "vo" ? estVo(p) : true));
-      const candidates = pistes.filter(voulues);   // sert aussi au critère de langue (pistes DTS comprises : la langue est bien dans le fichier)
+      const candidates = pistes.filter(voulues);   // sert aussi au critère de langue (pistes illisibles comprises : la langue est bien dans le fichier)
       // langue voulue absente : on se rabat sur une autre VF, puis sur la VO (le critère de langue pénalise déjà)
       const lisibles = (l) => l.filter((p) => !p.ignoree);
       const secours = pistes.filter((p) => !p.role && ["vff", "vfq", "vfb"].includes(p.langue));
       const retenue = (lisibles(candidates).length ? lisibles(candidates) : lisibles(secours).length ? lisibles(secours) : lisibles(pistes.filter((p) => !p.role))).slice().sort((a, b) => b.note - a.note)[0] || null;
+      // Ton équipement, audio : la meilleure lisibilité parmi les pistes de la langue voulue (sinon de secours) ; la version n'est
+      // touchée que si aucune n'est lue à coup sûr
+      const groupe = candidates.length ? candidates : secours.length ? secours : pistes.filter((p) => !p.role);
+      const etatAudio = groupe.length ? Math.max(...groupe.map((p) => p.lisible ?? 2)) : 2;
+      const clesAudio = etatAudio < 2 ? [...new Map(groupe.filter((p) => (p.lisible ?? 2) === etatAudio && p.cle).map((p) => [p.cle.join("|"), p.cle])).values()] : [];
       const NA = retenue ? retenue.note : 0;
       const heures = (v.duree || 0) / 60, goh = heures > 0 && v.taille > 0 ? v.taille / 1e9 / heures : null;
       const crit = [];
@@ -356,14 +435,11 @@
       if (r.hdr === "sdr-pref") ajoute(!estHdr, "SDR préféré", 0.9, v.hdr || "SDR");
       if (r.hdr === "requis") ajoute(estHdr, "HDR requis", 0.6, v.hdr || "SDR");
       if (r.hdr === "pref") ajoute(estHdr, "HDR préféré", 0.9, v.hdr || "SDR");   // 17/11/2026 : symétrique de « SDR préféré »
-      // Dolby Vision sans HDR10 : refusé (× 0,5), déconseillé (× 0,9) ou accepté, d'après le profil ou, par défaut, l'équipement
-      const dv = applique("dv", r);
-      if (dv.v !== "ok") ajoute(v.hdr !== "DV seul", "Pas de Dolby Vision seul", dv.v === "refuse" ? 0.5 : 0.9, dv.detail || v.hdr || "SDR");
-      // fichier .avi (v.avi est fourni par la page : conteneur du MediaInfo, sinon le titre ou l'extension) : refusé = note 0
-      const avi = applique("avi", r);
-      if (avi.v !== "ok") ajoute(!v.avi, "Pas de fichier AVI", avi.v === "refuse" ? 0 : 0.9, avi.detail || "AVI");
-      // vidéo AV1 : refusée (× 0,5) seulement quand l'équipement dit que l'appareil ne la décode pas
-      if (EQ.av1 === "non") ajoute(v.codec !== "AV1", "Pas de vidéo AV1", 0.5, "ton appareil ne décode pas l'AV1");
+      // Ton équipement (22/11/2026) : un seul critère pour tout ce que l'écran ou l'appareil ne lit pas (× 0,5 si un « Non »,
+      // sinon × 0,9 si un « Je ne sais pas »), détaillé dans j.eq (badges rouges et orange des pages)
+      const sansVf = !!retenue && !["vff", "vfq", "vfb", "?"].includes(retenue.langue);
+      const eq = compatibilite(v, r, { etat: etatAudio, cles: clesAudio }, sansVf);
+      if (eq.items.length) crit.push({ ok: false, lib: eq.items.map((x) => x.texte).join(", "), f: eq.f, detail: "Ton équipement", equipement: true });
       if (r.codec !== "indiff") ajoute(v.codec !== "H.264" && v.codec !== "XviD", r.codec === "requis" ? "H.265 / AV1 requis" : "H.265 / AV1 préféré", r.codec === "requis" ? 0.6 : 0.9, v.codec || "?");
       if (r.langue === "vo") ajoute(!!candidates.length, "Piste VO", 0.7,
         [...new Set(pistes.filter((p) => !p.role && LANG[p.langue]).map((p) => LANG[p.langue]))].join(", ") || "aucune");
@@ -388,7 +464,7 @@
       const pv = Math.min(1, NV.note / I.video), pa = I.audio > 0 ? Math.min(1, NA / I.audio) : 1;
       const fCrit = crit.reduce((t, c) => t * c.f, 1);
       const globale = 100 * (wv * pv + wa * pa) * fPoids * fCrit;
-      return { NV, pistes, retenue, NA, goh, crit, fPoids, poidsLib, wv, wa, pv, pa, fCrit, globale, taille: v.taille };
+      return { NV, pistes, retenue, NA, goh, crit, fPoids, poidsLib, wv, wa, pv, pa, fCrit, globale, taille: v.taille, eq };
     }
     // Verdict par rapport à ta version (d = écart de note globale en points, r = rapport de taille)
     function verdict(j, t) {
@@ -417,7 +493,7 @@
     function aspectOeuvre(faits) {
       return aspectDe((faits || []).filter((f) => f && f.w >= 1200 && f.h > 0 && !f.estime).map((f) => largeurAffichee(f) / f.h)); // anamorphique : largeur affichée
     }
-    return { classe, classeDe, largeurAffichee, maxiDe, effort, materiel, pixelsUtiles, facteurPixels, noteVideo, notePiste, ideal, juger, verdict, aspectOeuvre, aspectDe, equipement, selon, applique, estDts, sousTitres, PROFILS, CHAMPS, AUDIO_IDEAL, LANG, EFFORT,
+    return { classe, classeDe, largeurAffichee, maxiDe, effort, materiel, pixelsUtiles, facteurPixels, noteVideo, notePiste, ideal, juger, verdict, aspectOeuvre, aspectDe, equipement, EQUIPEMENT, CLES_EQ, compatibilite, est3D, sousTitres, PROFILS, CHAMPS, NEUTRES, AUDIO_IDEAL, LANG, EFFORT,
       sourceDe, difficulte, lignesPoussee, POUSSE, MODES: [["rapide", "Rapide"], ["pousse", "Poussée"]] };
   })();
 

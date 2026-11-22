@@ -26,16 +26,18 @@
 //     pistes: [{ format (nom commercial), brut (format MediaInfo), canaux, debit (kb/s), langue ("vff" | "vfq" | "vfb" | "vo" | "autre"),
 //                role ("" | "AD" | "commentaire"), titre }],
 //     st: [{ langue ("fr" ou code à 2 lettres, "?" inconnue), force (sous-titres forcés : seulement les passages en langue étrangère),
-//            sdh (pour sourds et malentendants) }] (lot VOSTFR, 11/11/2026 ; [] = aucun sous-titre) }
+//            sdh (pour sourds et malentendants), img ("pgs" | "vobsub" | false : depuis « l 8 ») }] (lot VOSTFR, 11/11/2026 ; [] = aucun sous-titre) }
 //     par (fichier anamorphique seulement : rapport des pixels, d'après « Display aspect ratio »),
 //     l: 6 (lecture du 12/11/2026 : « Bitrate » en un mot (l 2), format d'affichage (l 3), débit déduit du débit global,
 //     présentation « :> » et langue absente = « ? » (l 4) ; 17/11/2026 : torrent à plusieurs fichiers, le plus long (l 5),
 //     avec « nf » = nombre de fichiers décrits quand il y en a plusieurs ; 17/11/2026, soir (l 6) : « dtot » = somme des durées
 //     des fichiers (min) et « vmoy » = débit vidéo moyen pondéré par la durée (Mb/s), pour les séries ; 18/11/2026 (l 7) : réglages
 //     d'encodage complets dans « enc » (voir lireReglages) et « maxfall » (HDR : luminosité moyenne maximale, cd/m²), pour la
-//     notation poussée ; voir aRelire)
-// Version de l'extension « ReleaseScore » (ex « Notes C411 ») : identique à interface/lecteur-mediainfo.js de l'outil, sauf aRelire :
-// ici, seules les fiches à plusieurs fichiers lues avant « l 6 » sont relues (l'outil relit toutes celles lues avant « l 6 »).
+//     notation poussée ; voir aRelire) ; 22/11/2026 : « d3 » (true) pour une 3D (MVC, MultiView, stéréoscopique), sans relecture ;
+//     22/11/2026 (l 8, Ton équipement) : « dvp » (profil Dolby Vision : 7 = double couche), « img » de chaque sous-titre (« pgs »,
+//     « vobsub » ou false), 10 bits d'après le profil « High 10 » quand la profondeur manque ; voir aRelire
+// Copie exacte dans l'extension ReleaseScore (moteur/lecteur-mediainfo.js) depuis la 0.4.0 (22/11/2026 ; avant, aRelire y était plus
+// léger). aRelire relit une fois TOUTES les fiches lues avant « l 6 » (lues avec l'ancienne règle du premier fichier ; choix du 17/11/2026).
 // ou null si le texte n'est ni un MediaInfo ni un BDInfo lisible.
 // Faits lus avant le lot VOSTFR : pas de « st » (fiches-c411.js relit la fiche quand la version s'affiche).
 
@@ -111,15 +113,18 @@
   const CODES = { english: "en", anglais: "en", spanish: "es", espagnol: "es", italian: "it", italien: "it", german: "de", allemand: "de", japanese: "ja",
     japonais: "ja", korean: "ko", coréen: "ko", chinese: "zh", chinois: "zh", portuguese: "pt", portugais: "pt", russian: "ru", russe: "ru", dutch: "nl", arabic: "ar", arabe: "ar" };
   // pistes identiques (même langue, forcée ou non, SDH ou non) gardées une seule fois : quelques dizaines d'octets par version
-  const unique = (l) => { const vu = new Set(); return l.filter((s) => { const k = `${s.langue}|${s.force}|${s.sdh}`; if (vu.has(k)) return false; vu.add(k); return true; }); };
-  function lireSousTitre(langue, titre, service, forceChamp) {
+  // img (lecture « l 8 », 22/11/2026) : sous-titres en image, « pgs » (Blu-ray, S_HDMV/PGS) ou « vobsub » (DVD), sinon false (texte : SRT, ASS…)
+  const unique = (l) => { const vu = new Set(); return l.filter((s) => { const k = `${s.langue}|${s.force}|${s.sdh}|${s.img}`; if (vu.has(k)) return false; vu.add(k); return true; }); };
+  const formatSt = (f) => { const t = String(f || ""); return !t ? undefined : /pgs|hdmv|presentation graphic/i.test(t) ? "pgs" : /vobsub|vob ?sub|s_image|dvd ?sub/i.test(t) ? "vobsub" : false; };
+  function lireSousTitre(langue, titre, service, forceChamp, format) {
     const L = String(langue || "").toLowerCase().trim(), T = String(titre || "").toLowerCase();
     const fr = /^(fr|fre|fra|french|fran)/.test(L) || (!L && /\b(vff|vfq|vfb|vf|vostfr|french|français|francais|truefrench)\b/.test(T));
     const mot = (L.match(/^[a-zà-ÿ]+/) || [""])[0];
     const langueSt = fr ? "fr" : CODES[mot] || (/^[a-z]{2}\b/.test(L) ? L.slice(0, 2) : L ? mot.slice(0, 12) || "?" : "?");
     const force = /^(yes|oui|1|true)/i.test(String(forceChamp || "")) || /forc/.test(T);
     const sdh = /hearing|malentend|sourd|\bsdh\b|\bcc\b/i.test(`${T} ${service || ""}`);
-    return { langue: langueSt, force, sdh };
+    const img = formatSt(format);
+    return { langue: langueSt, force, sdh, ...(img !== undefined ? { img } : {}) };
   }
   // langue d'une piste française sans précision, d'après le nom de la release et la langue C411
   function vfDefaut(nom, langueC411) {
@@ -316,16 +321,28 @@
         video = Math.max(global - audio, global * 0.5) / 1000; videoMesure = "estime";
       }
     }
+    // 3D (22/11/2026) : piste MVC (Blu-ray 3D), « MultiView » ou mode stéréoscopique (côte à côte, dessus-dessous) dans le MediaInfo.
+    // Champ « d3 » présent seulement quand c'est une 3D ; les faits gardés avant n'ont pas ce champ (le nom de la release suffit
+    // presque toujours : la page Rechercher regarde aussi le nom).
+    const cles3d = Object.keys(vid).concat(Object.keys(gen)).join(" ");
+    const d3 = /\bMVC\b/i.test(champ(vid, "Format") || "") || /stereo\s?high/i.test(champ(vid, "Format profile", "Profil du format") || "")
+      || (/multi\s?view|st[ée]r[ée]oscop/i.test(cles3d) && Number(nombre(champ(vid, "MultiView_Count", "MultiView count", "Nombre de vues")) ?? 2) >= 2);
     const st = unique(S.filter((s) => s.nom === "text").map(({ champs: t }) =>
-      lireSousTitre(champ(t, "Language", "Langue"), champ(t, "Title", "Titre"), champ(t, "Service kind", "Genre de service", "Type de service"), champ(t, "Forced", "Forcé", "Forcée"))));
+      lireSousTitre(champ(t, "Language", "Langue"), champ(t, "Title", "Titre"), champ(t, "Service kind", "Genre de service", "Type de service"), champ(t, "Forced", "Forcé", "Forcée"),
+        [champ(t, "Format"), champ(t, "Codec ID", "Identifiant du codec")].filter(Boolean).join(" "))));
+    // Dolby Vision : numéro de profil (« Profile 7.6, dvhe.07.06 » ; 7 = double couche des remux UHD) (l 8, 22/11/2026)
+    const fHdr = String(champ(vid, "HDR format", "Format HDR") || "");
+    const dvp = /dolby vision/i.test(fHdr) ? Number((fHdr.match(/dv(?:he|av)\.0?(\d)/i) || fHdr.match(/prof(?:ile|il)\s*(\d)/i) || [])[1]) || null : null;
+    // H.264 en 10 bits (Hi10P) : profondeur absente, profil « High 10 »
+    const bitsLus = nombre(champ(vid, "Bit depth", "Profondeur binaire", "Profondeur de bits")) || (/high 10|hi10/i.test(champ(vid, "Format profile", "Profil du format") || "") ? 10 : null);
     return {
       lu: "mediainfo", conteneur: champ(gen, "Format") || null, duree: duree ? Math.round(duree * 10) / 10 : null, w, h,
-      ...(par && Math.abs(par - 1) > 0.03 && par > 0.5 && par < 2.5 ? { par: Math.round(par * 1000) / 1000 } : {}), bits: nombre(champ(vid, "Bit depth", "Profondeur binaire", "Profondeur de bits")) || 8,
+      ...(par && Math.abs(par - 1) > 0.03 && par > 0.5 && par < 2.5 ? { par: Math.round(par * 1000) / 1000 } : {}), bits: bitsLus || 8, ...(dvp ? { dvp } : {}),
       hdr: hdrDe(champ(vid, "HDR format", "Format HDR"), champ(vid, "Transfer characteristics", "Caractéristiques du transfert")),
       codec: codecDe(champ(vid, "Format")), video: arrondi(video, 2),
       videoEtiquette: etiquette != null ? arrondi(etiquette / 1000, 2) : null, videoMesure,
       lib: /x26[45]|nvenc|qsv|quick ?sync|amf|vce|videotoolbox|svt|rav1e|aom|xvid|divx/i.test(lib) ? lib.slice(0, 60) : "",
-      enc: enc && Object.values(enc).some((x) => x != null) ? enc : null, reglages, ...(maxfall > 0 ? { maxfall } : {}), pistes, st, ...(S.nf > 1 ? { nf: S.nf } : {}), l: 7,
+      enc: enc && Object.values(enc).some((x) => x != null) ? enc : null, reglages, ...(maxfall > 0 ? { maxfall } : {}), pistes, st, ...(S.nf > 1 ? { nf: S.nf } : {}), ...(d3 ? { d3: true } : {}), l: 8,
     };
   }
 
@@ -371,16 +388,16 @@
     // (La Femme de ménage, BDMV : 43 sous-titres contre 1 758 à 2 536 pour les autres pistes françaises).
     const brutsSt = bloc("SUBTITLES").map((l) => {
       const [, langue = "", , desc = ""] = colonnes(l, 4);
-      return { ...lireSousTitre(langue, "", "", ""), n: Number(((desc.match(/(\d+)\s*Captions?/i) || [])[1] || "").replace(/\D/g, "")) || null };
+      return { ...lireSousTitre(langue, "", "", "", "Presentation Graphics"), n: Number(((desc.match(/(\d+)\s*Captions?/i) || [])[1] || "").replace(/\D/g, "")) || null };
     });
     const maxi = {};
     for (const s of brutsSt) if (s.n) maxi[s.langue] = Math.max(maxi[s.langue] || 0, s.n);
     const st = unique(brutsSt.map(({ n, ...s }) => ({ ...s, force: s.force || (n != null && maxi[s.langue] > 0 && n < maxi[s.langue] / 5) })));
     return {
       lu: "bdinfo", conteneur: "BDAV", duree: duree ? Math.round(duree * 10) / 10 : null, w: res >= 2000 ? 3840 : res >= 1000 ? 1920 : res >= 700 ? 1280 : 720, h: res || null,
-      bits: nombre((descV.match(/(\d+) bits/) || [])[1]) || 8, hdr, codec: codecDe(codecV),
+      bits: nombre((descV.match(/(\d+) bits/) || [])[1]) || 8, hdr, ...(avecDV ? { dvp: 7 } : {}), codec: codecDe(codecV),   // Blu-ray UHD en Dolby Vision : toujours le profil 7
       video: arrondi(Number(String(debitV).replace(/[^\d.]/g, "")) / 1000, 2), videoEtiquette: null, videoMesure: "bdinfo",
-      lib: "", enc: null, reglages: null, pistes, st, l: 7,
+      lib: "", enc: null, reglages: null, pistes, st, ...(videos.some((l) => /\bMVC\b/i.test(l)) ? { d3: true } : {}), l: 8,
     };
   }
   const arrondi = (x, n = 1) => (x == null || !Number.isFinite(x) ? null : Math.round(x * 10 ** n) / 10 ** n);
@@ -398,13 +415,17 @@
   // Faits d'une fiche à relire UNE fois quand sa version s'affiche (fiches-c411.js, recherche-c411.js ; la page Rechercher a la même règle) :
   // lus avant le lot VOSTFR (sans « st ») ; sans débit vidéo avant le 12/11/2026 (« Bitrate » en un mot) ; image plus étroite que 1,7:1
   // lue avant le 12/11/2026 (peut-être anamorphique : format d'affichage pas encore lu) ; sans débit vidéo ou toutes pistes
-  // « autre » lues avant la lecture « l 4 » (débit déduit du débit global, présentation « :> », langue absente = « ? »).
+  // « autre » lues avant la lecture « l 4 » (débit déduit du débit global, présentation « :> », langue absente = « ? ») ;
+  // toute fiche lue avant la lecture « l 6 » (torrent à plusieurs fichiers : voir lireMediainfo).
   const aRelire = (f) => !!f && (f.st === undefined || (!(f.video > 0) && !(f.l >= 4))
     || (!(f.l >= 3) && f.lu === "mediainfo" && f.w > 0 && f.h > 0 && f.w / f.h < 1.7)
     || (!(f.l >= 4) && (f.pistes || []).length > 0 && f.pistes.every((x) => x.langue === "autre"))
-    || (f.nf > 1 && !(f.l >= 6))   // l 6 (17/11/2026, soir) : durée totale et débit moyen des fichiers (séries)
-    || (!(f.l >= 7) && f.reglages != null));   // l 7 (18/11/2026, notation poussée) : réglages d'encodage complets et MaxFALL ;
+    || !(f.l >= 6)     // l 5 et l 6 (17/11/2026) : fichier le plus long, durée totale et débit moyen des fichiers ; avant, le premier
+                       // fichier seulement, et les faits gardés ne disent pas lesquelles en avaient plusieurs : tout est relu une fois
+    || (!(f.l >= 7) && f.reglages != null)   // l 7 (18/11/2026, notation poussée) : réglages d'encodage complets et MaxFALL ;
                        // seules les fiches qui avaient des réglages sont relues (environ une sur trois), les autres n'ont rien de plus à lire
+    || (!(f.l >= 8) && (/^DV/.test(f.hdr || "") || (f.st || []).length > 0)));   // l 8 (22/11/2026, Ton équipement) : profil Dolby
+                       // Vision et format des sous-titres (image ou texte) ; seules les fiches en Dolby Vision ou avec des sous-titres
   // lireLangue, lireSousTitre : aussi pour la base du NAS (recherche-c411.js)
   const M = { lire, aRelire, sections, blocs, kbps, octets, minutes, hdrDe, lireReglages, vfDefaut, lireLangue, lireSousTitre, unique };
   if (typeof module === "object" && module.exports) module.exports = M;

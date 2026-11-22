@@ -1,4 +1,4 @@
-ReleaseScore — extension pour Chrome (version 0.3.0, 18/11/2026)
+ReleaseScore — extension pour Chrome (version 0.4.0, 22/11/2026)
 ==================================================================
 
 Ce qu'elle fait
@@ -19,6 +19,23 @@ Mettre à jour
      dossier serait une nouvelle extension, sans tes profils ni les fiches déjà lues.
   2. Dans chrome://extensions, cliquer la flèche ronde de la carte de l'extension.
   3. Recharger les fiches de C411 ouvertes (F5). Profils et équipement sont conservés.
+
+Nouveautés de la 0.4.0
+  - Questionnaire « Ton équipement » plus complet, en trois groupes (écran, appareil de lecture, goûts) : en plus, le Dolby
+    Vision profil 7 (double couche des remux UHD), la 3D, le H.264 en 10 bits (animés), l'Opus, le TrueHD et le DTS-HD MA
+    transmis tels quels (HDMI eARC), les sous-titres en image (PGS, VobSub). Nouvelle question « Tu regardes avec » (Plex,
+    Jellyfin, Kodi, VLC, Infuse, lecteur de la télé) : avec Kodi, VLC ou Infuse seulement, les réponses qui s'en déduisent
+    sont remplies (« déduit de ton lecteur »), modifiables.
+  - Effet sur la note, une fois par version : « Non » = × 0,5 (en rouge dans le résumé), « Je ne sais pas » = × 0,9 (en
+    orange avec « ? »), sauf la 3D (« Je ne sais pas » compte comme « Non »). Audio : une piste que ton appareil ne lit pas est
+    ignorée dans la note audio ; la version n'est touchée que si aucune piste de ta langue n'est lue. Attention : sans réponse,
+    les versions concernées (AV1, DTS, Opus, sous-titres en image…) perdent 10 % : remplis le questionnaire.
+  - « Dolby Vision sans HDR10 » et « Fichier AVI » ne sont plus dans le profil : seulement dans Ton équipement.
+  - Pastille « 3D » à la place de la note d'une version 3D que ton écran ne lit pas (comme « Bonus »).
+  - Profils de base : « Enregistrer » garde tes changements (« (modifié) » reste affiché tant qu'ils diffèrent de l'original) ;
+    « Revenir à l'original » les efface.
+  - Note audio du DTS alignée sur LibraryScore. Fiches gardées en Dolby Vision ou avec des sous-titres : relues une fois à la
+    prochaine visite (profil Dolby Vision, format des sous-titres).
 
 Nouveautés de la 0.3.0
   - Nouveau réglage « Notation » dans la fenêtre de l'extension : « Rapide » (par défaut, la note d'avant) ou « Poussée ».

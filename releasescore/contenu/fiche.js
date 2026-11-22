@@ -172,7 +172,7 @@
       let n;
       while ((n = w.nextNode())) if (/^\s*Genre\s*:?\s*$/.test(n.nodeValue)) { anim = /anim/i.test((n.parentElement.parentElement || n.parentElement).textContent || ""); break; }
     }
-    return { film, anim, vo: premier("vo"), runtime: premier("runtime") };
+    return { film, anim, vo: premier("vo"), runtime: premier("runtime"), titres: premier("titres") };
   }
 
   // ---------- lecture des fiches ----------
@@ -234,7 +234,8 @@
     const taille = it && Number(it.size) > 0 ? Number(it.size) : page.taille;
     return {
       v: VERSION_CACHE, t: new Date().toISOString(), f, ...(f ? {} : { sans }), nom, taille, ...(it && Number(it.size) > 0 ? {} : { approx: true }), src,
-      o: { type: m.tmdbType || tm.type || tm.media_type || null, vo: langueOriginale(tm), anim, runtime: Number(tm.runtime) > 0 ? Number(tm.runtime) : null },
+      o: { type: m.tmdbType || tm.type || tm.media_type || null, vo: langueOriginale(tm), anim, runtime: Number(tm.runtime) > 0 ? Number(tm.runtime) : null,
+        titres: [tm.title, tm.original_title, tm.name, tm.original_name].filter((x) => typeof x === "string" && x).slice(0, 4) },   // 0.4.0 : « 3D » dans le titre (Piranha 3D)
     };
   }
   // Langue originale : C411 ne donne pas « original_language » ; tmdbData.languages (format vu le 17/11 : à confirmer par le diagnostic).
@@ -342,9 +343,13 @@
       const duree = o.film ? (f.duree || o.runtime || 120) : saison ? f.dtot : (dureeParDebit(f, e.taille) || f.duree || null);
       const avi = f.conteneur ? /^AVI/i.test(f.conteneur) : AVI_TITRE.test(e.nom || "");
       const pleinCadre = !!f.pleinCadre || PLEIN_CADRE.test(e.nom || "");
-      const j = duree > 0 && e.taille > 0 ? V2.juger({ ...f, taille: e.taille, duree, avi, pleinCadre, source: V2.sourceDe(e.nom) }, PROFIL.r, ctx.I, ctx) : null;
+      // 3D (0.4.0) : MediaInfo, sinon le nom (« 3D » seul ne compte que si le titre de l'œuvre est connu et ne le contient pas)
+      const d3 = !!f.d3 || V2.est3D(e.nom, o.titres);
+      const j = duree > 0 && e.taille > 0 ? V2.juger({ ...f, taille: e.taille, duree, avi, pleinCadre, source: V2.sourceDe(e.nom), d3 }, PROFIL.r, ctx.I, ctx) : null;
       if (!j) { RESULTATS.set(l.hash, { type: "inconnue" }); continue; }
       j.plein = pleinCadre; j.source = V2.sourceDe(e.nom);
+      // version 3D que ton écran ne lit pas (Ton équipement : « Non » ou non renseigné) : pastille « 3D » à la place de la note (comme « Bonus »)
+      if (j.eq.items.some((x) => x.k === "d3")) { RESULTATS.set(l.hash, { type: "3d", j, f, e, ctx, saison, duree, note: Math.round(j.globale) }); continue; }
       const nManque = j.crit.filter((c) => !c.ok && !c.poids).length, auDessus = j.crit.some((c) => !c.ok && c.poids);
       const couleur = auDessus ? "r" : nManque === 0 ? "v" : nManque === 1 ? "j" : "g";
       RESULTATS.set(l.hash, { type: "note", j, f, e, ctx, note: Math.round(j.globale), couleur, saison, duree });
@@ -375,6 +380,10 @@
 .p.sans{border-style:dashed;font-weight:500;color:var(--doux)}
 .p.bonus{font-size:11px;font-weight:600;letter-spacing:.02em;color:var(--doux)}
 .enligne .p.bonus{font-size:10px}
+.eq{display:flex;flex-wrap:wrap;gap:4px;align-items:center;font-size:12px}
+.eq span{font-size:11px;font-weight:600;border-radius:4px;padding:1px 6px;border:1px solid}
+.eq .non{color:var(--r-t);border-color:var(--r-b)}.eq .doute{color:var(--j-t);border-color:var(--j-b)}
+:host([data-theme=clair]) .eq .doute{color:#92400e}
 .p.att{border-color:transparent;cursor:progress;background:linear-gradient(90deg,var(--c1) 25%,var(--c2) 50%,var(--c1) 75%);background-size:200% 100%;animation:lueur 1.4s linear infinite}
 .p:focus-visible,.p.ouvert{outline:none;box-shadow:0 0 0 2px var(--fond),0 0 0 4px var(--anneau)}
 @keyframes lueur{0%{background-position:200% 0}100%{background-position:-200% 0}}
@@ -501,7 +510,7 @@
     const infoV = [f.lib ? f.lib.split(":")[0] : "", reg, saison ? `saison de ${f.nf} fichiers : durée totale ${hm(duree)}` : f.nf > 1 ? `torrent de ${f.nf} fichiers : le plus long sert à la note` : ""].filter(Boolean).join(" · ");
     // audio
     const a = j.pistes.map((p) => {
-      const nom = `${V2.LANG[p.langue] || p.langue || "?"} ${p.type === "sans perte" ? (p.format || p.brut).replace(/^Dolby /, "") : p.type} ${p.canaux ? (p.canaux >= 8 ? "7.1" : p.canaux >= 6 ? "5.1" : p.canaux === 2 ? "2.0" : p.canaux + " can.") : ""}${p.type !== "sans perte" ? " " + kb(p.debit) : ""}${p.role ? ` (${p.role === "AD" ? "audiodescription" : "commentaire"})` : p.ignoree ? " (ton appareil ne lit pas le DTS)" : ""}`;
+      const nom = `${V2.LANG[p.langue] || p.langue || "?"} ${p.type === "sans perte" ? (p.format || p.brut).replace(/^Dolby /, "") : p.type} ${p.canaux ? (p.canaux >= 8 ? "7.1" : p.canaux >= 6 ? "5.1" : p.canaux === 2 ? "2.0" : p.canaux + " can.") : ""}${p.type !== "sans perte" ? " " + kb(p.debit) : ""}${p.role ? ` (${p.role === "AD" ? "audiodescription" : "commentaire"})` : p.pourquoi ? ` (${p.pourquoi})` : ""}`;
       return li(nom, p.role ? "écartée" : p.ignoree ? "ignorée" : nb(p.note, 0), p.role || p.ignoree ? "barre" : p === j.retenue ? "retenue" : "");
     });
     if (!a.length) a.push(li("Aucune piste connue", ""));
@@ -516,6 +525,15 @@
     n.push(li("Note globale", nb(j.globale, 0), "total"));
     d.append(bloc(LP ? "Vidéo (notation poussée)" : "Vidéo", v, infoV, LP ? LP.mention : ""), bloc("Audio", a, stx ? `Sous-titres : ${stx.texte}` : ""), bloc(`Note (profil ${PROFIL.affiche})`, n, e.approx ? "Taille lue sur la page (arrondie) : la note peut différer d'un point." : ""));
     return d;
+  }
+  // Ton équipement (0.4.0) : rouge = « Non » (× 0,5), orange avec « ? » = « Je ne sais pas » (× 0,9), une fois par version
+  function bulleEquipement(j, sauf) {
+    const items = ((j && j.eq && j.eq.items) || []).filter((x) => x.k !== sauf);
+    if (!items.length) return;
+    const d = el("div", "eq");
+    d.append("Ton équipement :");
+    for (const x of items) { const s = el("span", x.etat === "non" ? "non" : "doute", x.court); s.title = `${x.texte} (× ${x.etat === "non" ? "0,5" : "0,9"})`; d.append(s); }
+    bulle.append(d, el("div", "info", items.map((x) => x.texte).join(" · ") + (sauf ? "" : ` : × ${j.eq.f === 0.5 ? "0,5" : "0,9"}${items.length > 1 ? ", une fois pour la version" : ""}.`)));
   }
   function dessinerBulle() {
     if (!OUVERTE || !bulle) return;
@@ -534,8 +552,9 @@
       bulle.append(tete);
       const sn = el("div"); sn.append("vidéo ", el("b", "", nb(x.j.NV.note, 0)), " · audio ", el("b", "", nb(x.j.NA, 0)));
       bulle.append(sn);
-      const manque = x.j.crit.filter((c) => !c.ok).map((c) => c.lib);
+      const manque = x.j.crit.filter((c) => !c.ok && !c.equipement).map((c) => c.lib);
       if (manque.length) bulle.append(el("div", "manque", `Manque : ${manque.join(", ")}`));
+      bulleEquipement(x.j);
       const Pp = x.j.NV.pousse;
       if (Pp) bulle.append(el("div", "info", Pp.source === "verifies" ? "Paramètres vérifiés" : Pp.source === "non publies" ? "Paramètres non publiés : note sur un encodage moyen" : `${x.j.source} : flux d'origine`));
       const plus = el("button", "plus", `${OUVERTE.detail ? "▾" : "▸"} Pourquoi cette note ?`); plus.type = "button"; plus.setAttribute("aria-expanded", String(!!OUVERTE.detail));
@@ -544,6 +563,9 @@
       if (OUVERTE.detail) { bulle.classList.add("large"); bulle.append(detailDe(x)); }
     } else if (x.type === "sans") {
       bulle.append(el("div", "", "Pas de note pour cette version"), el("div", "info", x.raison === "illisible" ? "Le MediaInfo de la fiche n'a pas pu être lu." : x.raison === "inconnue" ? "C411 ne trouve plus cette fiche." : "La fiche n'a pas de MediaInfo : sans lui, rien ne se mesure (l'extension n'affiche pas de note estimée)."));
+    } else if (x.type === "3d") {
+      bulle.append(el("div", "", "Version 3D"), el("div", "info", `${V2.equipement().d3 === "non" ? "Ton écran ne lit pas la 3D" : "Ton équipement ne dit pas si ton écran lit la 3D : comptée comme non lue"} (fenêtre de l'extension, « Ton équipement »). Sa note serait ${x.note} / 100 (× 0,5).`));
+      bulleEquipement(x.j, "d3");
     } else if (x.type === "bonus") {
       bulle.append(el("div", "", "Bonus seuls, sans le film"), el("div", "info", `${x.f.nf > 1 ? `${x.f.nf} fichiers, le plus long dure` : "Le fichier dure"} ${hm(x.f.duree)}, le film ${hm(x.film.min)} (d'après ${x.film.source}). Sans le film, cette version n'est pas notée.`));
     } else if (x.type === "inconnue") {
@@ -568,6 +590,7 @@
       if (!x) { b.classList.add("att"); b.textContent = ""; b.setAttribute("aria-label", `Note en cours de lecture (${lus} fiches lues sur ${P.size})`); }
       else if (x.type === "note") { b.classList.add(x.couleur); b.textContent = String(x.note); b.setAttribute("aria-label", `Note ${x.note} sur 100, voir le détail`); l.etoile.style.display = x.etoile ? "" : "none"; }
       else if (x.type === "bonus") { b.classList.add("bonus"); b.textContent = "Bonus"; b.setAttribute("aria-label", "Bonus seuls, sans le film : pas de note, voir pourquoi"); }
+      else if (x.type === "3d") { b.classList.add("bonus"); b.textContent = "3D"; b.setAttribute("aria-label", "Version 3D que ton écran ne lit pas : voir pourquoi"); }
       else if (x.type === "erreur") { b.classList.add("sans"); b.textContent = "!"; b.setAttribute("aria-label", "Fiche non lue, voir pourquoi"); }
       else { b.classList.add("sans"); b.textContent = x.type === "inconnue" ? "?" : "–"; b.setAttribute("aria-label", "Pas de note pour cette version, voir pourquoi"); }
     }

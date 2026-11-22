@@ -18,7 +18,9 @@ Uniquement à partir de ce qui se mesure dans le MediaInfo de chaque version. Ni
 - **Audio** : la meilleure piste dans ta langue (format, débit, canaux, Atmos).
 - **Ton profil** : ce que tu veux (1080p ou 4K, VFF ou VO, HDR, poids visé en Go par heure de film…). La note baisse si un critère manque ou si le fichier dépasse ton plafond de poids.
 
-Six profils sont fournis : HDLight 1080p (par défaut), 1080p Haute qualité, 4KLight, 4K HDR cinéma, Petit fichier, Qualité maximale. Tu peux les modifier ou en créer d'autres. Le questionnaire **« Ton équipement »** (taille de l'écran, distance, HDR, Dolby Vision…) crée un profil adapté à ta télé.
+- **Ton équipement** : ce que ton écran et ton appareil lisent sans conversion (Dolby Vision, profil 7, 3D, AV1, H.264 10 bits, .avi, DTS, Opus, TrueHD / DTS-HD MA tels quels, sous-titres en image). Une version que ton matériel ne lit pas est notée × 0,5 (en rouge dans le résumé) ; « Je ne sais pas » : × 0,9 (en orange). Une version 3D que ton écran ne lit pas affiche « 3D » à la place de la note.
+
+Six profils sont fournis : HDLight 1080p (par défaut), 1080p Haute qualité, 4KLight, 4K HDR cinéma, Petit fichier, Qualité maximale. Tu peux les modifier (et garder tes changements : « Enregistrer », puis « Revenir à l'original » si besoin) ou en créer d'autres. Le questionnaire **« Ton équipement »** (taille de l'écran, distance, HDR, ce que lit ton appareil, comment tu regardes tes films…) crée un profil adapté à ta télé.
 
 ### Deux notations : rapide et poussée
 
